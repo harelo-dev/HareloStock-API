@@ -12,8 +12,16 @@ import numpy as np
 # ── Random consistency indices (Saaty, 1980) ─────────────────────────────────
 
 _RANDOM_INDICES = {
-    1: 0, 2: 0, 3: 0.58, 4: 0.90, 5: 1.12,
-    6: 1.24, 7: 1.32, 8: 1.41, 9: 1.45, 10: 1.51,
+    1: 0,
+    2: 0,
+    3: 0.58,
+    4: 0.90,
+    5: 1.12,
+    6: 1.24,
+    7: 1.32,
+    8: 1.41,
+    9: 1.45,
+    10: 1.51,
 }
 
 
@@ -39,15 +47,13 @@ def _fill_reciprocals(matrix: np.ndarray) -> np.ndarray:
 
 def _eigenvector(matrix: np.ndarray) -> np.ndarray:
     """Compute the priority vector (normalised principal eigenvector)."""
-    # Square the matrix a few times to converge
-    m = matrix.copy()
-    for _ in range(6):
-        m = m @ m
-    row_sums = m.sum(axis=1)
-    total = row_sums.sum()
+    eigenvalues, eigenvectors = np.linalg.eig(matrix)
+    principal = int(np.argmax(eigenvalues.real))
+    priorities = np.abs(eigenvectors[:, principal].real)
+    total = priorities.sum()
     if total == 0:
         return np.ones(matrix.shape[0]) / matrix.shape[0]
-    return row_sums / total
+    return priorities / total
 
 
 def _consistency_ratio(matrix: np.ndarray) -> float | None:
@@ -63,15 +69,16 @@ def _consistency_ratio(matrix: np.ndarray) -> float | None:
     ri = _RANDOM_INDICES.get(n, 1.51)
     if ri == 0:
         return 0.0
-    return round(float(ci / ri), 6)
+    return round(max(0.0, float(ci / ri)), 6)
 
 
-def _normalise_quantitative(values: list[float]) -> list[float]:
+def _normalise_quantitative(values: list[float], minimise: bool = False) -> list[float]:
     """Normalise a list of quantitative values to sum to 1."""
-    total = sum(values)
+    transformed = [1.0 / value for value in values] if minimise else values
+    total = sum(transformed)
     if total == 0:
         return [1.0 / len(values)] * len(values)
-    return [v / total for v in values]
+    return [value / total for value in transformed]
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -83,6 +90,7 @@ def analytical_hierarchy_process(
     options: list[str],
     option_scores: dict[str, list[list[float]] | list[float]],
     quantitative_criteria: list[str] | None = None,
+    minimize_criteria: list[str] | None = None,
     item_costs: dict[str, float] | None = None,
 ) -> dict:
     """Run AHP analysis and return rankings.
@@ -94,12 +102,14 @@ def analytical_hierarchy_process(
         option_scores: Per-criterion scores. Nested list = subjective (pairwise).
                        Flat list = quantitative (raw values).
         quantitative_criteria: Which criteria use quantitative values.
+        minimize_criteria: Quantitative criteria where lower raw values are preferred.
         item_costs: Optional costs per option for cost-benefit analysis.
 
     Returns:
         Dict with rankings, optional cost_benefit_ratios, and consistency_ratio.
     """
     quant_set = set(quantitative_criteria or [])
+    minimize_set = set(minimize_criteria or [])
 
     # Step 1: Criteria eigenvector
     criteria_matrix = np.array(criteria_scores, dtype=float)
@@ -117,7 +127,7 @@ def analytical_hierarchy_process(
 
         if criterion in quant_set:
             # Quantitative — normalise raw values
-            weights = np.array(_normalise_quantitative(scores))
+            weights = np.array(_normalise_quantitative(scores, minimise=criterion in minimize_set))
         else:
             # Subjective — pairwise comparison
             alt_matrix = np.array(scores, dtype=float)
@@ -143,9 +153,7 @@ def analytical_hierarchy_process(
         if total_cost > 0:
             norm_costs = {k: v / total_cost for k, v in item_costs.items()}
             cost_benefit = {
-                k: round(rankings[k] / norm_costs[k], 6)
-                for k in options
-                if norm_costs[k] > 0
+                k: round(rankings[k] / norm_costs[k], 6) for k in options if norm_costs[k] > 0
             }
 
     return {

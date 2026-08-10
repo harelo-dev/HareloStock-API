@@ -3,5 +3,8 @@ uvicorn[standard]==0.34.*
 pydantic==2.*
 pydantic-settings==2.*
 numpy>=1.26
-scipy>=1.12
+scipy>=1.15
 python-multipart>=0.0.9
+SQLAlchemy>=2.0,<3
+alembic>=1.13,<2
+psycopg[binary]>=3.2,<4

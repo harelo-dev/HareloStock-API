@@ -41,3 +41,8 @@ logs/
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Local databases
+*.db
+*.db-shm
+*.db-wal

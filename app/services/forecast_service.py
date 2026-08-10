@@ -1,9 +1,8 @@
-"""Demand forecasting engine — pure Python re-implementation of supplychainpy's
-Forecast, LinearRegression, and OptimiseSmoothingLevelGeneticAlgorithm for Python 3.13.
+"""Demand forecasting engine inspired by supplychainpy and implemented for Python 3.13.
 
 Implements:
-  - Simple Exponential Smoothing (SES) with optional genetic-algorithm optimisation
-  - Holt's Trend Corrected Exponential Smoothing (HTCES) with optional optimisation
+  - Simple Exponential Smoothing (SES) with bounded SSE optimisation
+  - Holt's Trend Corrected Exponential Smoothing (HTCES) with seeded optimisation
   - Linear regression for trend analysis
   - Mean Absolute Percentage Error (MAPE)
 """
@@ -11,8 +10,9 @@ Implements:
 from __future__ import annotations
 
 import math
-import random
-from dataclasses import dataclass
+
+import numpy as np
+from scipy.optimize import differential_evolution, minimize_scalar
 
 
 # ── Linear regression helper ─────────────────────────────────────────────────
@@ -31,9 +31,9 @@ def _least_squares(values: list[dict]) -> dict:
     sum_x = sum(xs)
     sum_y = sum(ys)
     sum_xy = sum(x * y for x, y in zip(xs, ys))
-    sum_x2 = sum(x ** 2 for x in xs)
+    sum_x2 = sum(x**2 for x in xs)
 
-    denom = n * sum_x2 - sum_x ** 2
+    denom = n * sum_x2 - sum_x**2
     if denom == 0:
         return {"slope": 0.0, "intercept": sum_y / n if n else 0.0}
 
@@ -45,27 +45,33 @@ def _least_squares(values: list[dict]) -> dict:
 # ── Simple Exponential Smoothing ─────────────────────────────────────────────
 
 
-def _ses_one_pass(orders: list[float], alpha: float) -> list[dict]:
+def _ses_one_pass(
+    orders: list[float], alpha: float, initial_level: float | None = None
+) -> list[dict]:
     """Single pass of SES, returning per-period breakdown."""
     if not orders:
         return []
 
     result = []
-    # Initial estimate = first demand value
-    forecast = orders[0]
+    # The forecast for a period is the level available before observing it.
+    level = orders[0] if initial_level is None else initial_level
 
     for t, actual in enumerate(orders):
+        forecast = level
         error = actual - forecast
-        se = error ** 2
-        result.append({
-            "t": t + 1,
-            "demand": actual,
-            "forecast": round(forecast, 4),
-            "error": round(error, 4),
-            "squared_error": round(se, 4),
-            "alpha": alpha,
-        })
-        forecast = alpha * actual + (1 - alpha) * forecast
+        se = error**2
+        level = alpha * actual + (1 - alpha) * level
+        result.append(
+            {
+                "t": t + 1,
+                "demand": actual,
+                "forecast": round(forecast, 4),
+                "error": round(error, 4),
+                "squared_error": round(se, 4),
+                "alpha": alpha,
+                "level": level,
+            }
+        )
 
     return result
 
@@ -95,54 +101,34 @@ def _mape(breakdown: list[dict]) -> float:
     return (sum(errors) / len(errors) * 100) if errors else 0.0
 
 
-# ── Genetic Algorithm for SES optimisation ────────────────────────────────────
+# ── Numerical optimisation ────────────────────────────────────────────────────
 
 
 def _optimise_alpha_ses(
     orders: list[float],
     initial_alpha: float = 0.5,
-    population_size: int = 10,
-    generations: int = 50,
+    initial_level: float | None = None,
 ) -> float:
-    """Simple GA to find optimal alpha for SES by minimising SSE."""
-    # Generate initial population
-    population = [max(0.01, min(0.99, random.gauss(initial_alpha, 0.2)))
-                  for _ in range(population_size)]
-
-    for _gen in range(generations):
-        # Evaluate fitness (lower SSE = better)
-        scored = []
-        for alpha in population:
-            bd = _ses_one_pass(orders, alpha)
-            sse = _sum_squared_errors(bd)
-            scored.append((alpha, sse))
-        scored.sort(key=lambda x: x[1])
-
-        # Elitism — keep top half
-        survivors = [s[0] for s in scored[: population_size // 2]]
-
-        # Crossover + mutation
-        children = []
-        while len(children) < population_size - len(survivors):
-            p1, p2 = random.sample(survivors, 2)
-            child = (p1 + p2) / 2  # arithmetic crossover
-            child += random.gauss(0, 0.05)  # mutation
-            child = max(0.01, min(0.99, child))
-            children.append(child)
-
-        population = survivors + children
-
-    # Return best
-    best = min(population, key=lambda a: _sum_squared_errors(_ses_one_pass(orders, a)))
-    return round(best, 6)
+    """Find the bounded one-dimensional SSE minimum for SES."""
+    result = minimize_scalar(
+        lambda alpha: _sum_squared_errors(_ses_one_pass(orders, float(alpha), initial_level)),
+        bounds=(1e-6, 1.0),
+        method="bounded",
+        options={"xatol": 1e-10, "maxiter": 500},
+    )
+    alpha = float(result.x) if result.success else initial_alpha
+    return round(alpha, 6)
 
 
 # ── Holt's Trend Corrected Exponential Smoothing ─────────────────────────────
 
 
 def _htces_one_pass(
-    orders: list[float], alpha: float, gamma: float,
-    intercept: float, slope: float,
+    orders: list[float],
+    alpha: float,
+    gamma: float,
+    intercept: float,
+    slope: float,
 ) -> list[dict]:
     """Single pass of Holt's trend corrected ES."""
     if not orders:
@@ -155,29 +141,31 @@ def _htces_one_pass(
     for t, actual in enumerate(orders):
         forecast = level + trend
         error = actual - forecast
-        se = error ** 2
-
-        result.append({
-            "t": t + 1,
-            "demand": actual,
-            "forecast": round(forecast, 4),
-            "error": round(error, 4),
-            "squared_error": round(se, 4),
-            "alpha": alpha,
-            "gamma": gamma,
-        })
-
+        se = error**2
         new_level = alpha * actual + (1 - alpha) * (level + trend)
         new_trend = gamma * (new_level - level) + (1 - gamma) * trend
+
+        result.append(
+            {
+                "t": t + 1,
+                "demand": actual,
+                "forecast": round(forecast, 4),
+                "error": round(error, 4),
+                "squared_error": round(se, 4),
+                "alpha": alpha,
+                "gamma": gamma,
+                "level": new_level,
+                "trend": new_trend,
+            }
+        )
+
         level = new_level
         trend = new_trend
 
     return result
 
 
-def _htces_forecast_extend(
-    last_level: float, last_trend: float, length: int
-) -> list[float]:
+def _htces_forecast_extend(last_level: float, last_trend: float, length: int) -> list[float]:
     """Extend Holt's forecast into the future."""
     return [round(last_level + last_trend * (i + 1), 4) for i in range(length)]
 
@@ -186,48 +174,27 @@ def _optimise_alpha_gamma_htces(
     orders: list[float],
     initial_alpha: float = 0.5,
     initial_gamma: float = 0.5,
-    population_size: int = 10,
-    generations: int = 50,
+    initial_period: int = 6,
+    seed: int = 42,
 ) -> tuple[float, float]:
-    """GA to find optimal alpha & gamma for Holt's by minimising SSE."""
+    """Find alpha and gamma with seeded differential evolution."""
     processed = [{"t": i + 1, "demand": d} for i, d in enumerate(orders)]
-    stats = _least_squares(processed[:6])
+    stats = _least_squares(processed[:initial_period])
     intercept, slope_val = stats["intercept"], stats["slope"]
-
-    population = [
-        (
-            max(0.01, min(0.99, random.gauss(initial_alpha, 0.2))),
-            max(0.01, min(0.99, random.gauss(initial_gamma, 0.2))),
-        )
-        for _ in range(population_size)
-    ]
-
-    for _gen in range(generations):
-        scored = []
-        for a, g in population:
-            bd = _htces_one_pass(orders, a, g, intercept, slope_val)
-            sse = _sum_squared_errors(bd)
-            scored.append((a, g, sse))
-        scored.sort(key=lambda x: x[2])
-
-        survivors = [(s[0], s[1]) for s in scored[: population_size // 2]]
-
-        children = []
-        while len(children) < population_size - len(survivors):
-            (p1a, p1g), (p2a, p2g) = random.sample(survivors, 2)
-            ca = max(0.01, min(0.99, (p1a + p2a) / 2 + random.gauss(0, 0.05)))
-            cg = max(0.01, min(0.99, (p1g + p2g) / 2 + random.gauss(0, 0.05)))
-            children.append((ca, cg))
-
-        population = survivors + children
-
-    best = min(
-        population,
-        key=lambda ag: _sum_squared_errors(
-            _htces_one_pass(orders, ag[0], ag[1], intercept, slope_val)
+    result = differential_evolution(
+        lambda params: _sum_squared_errors(
+            _htces_one_pass(orders, float(params[0]), float(params[1]), intercept, slope_val)
         ),
+        bounds=((1e-6, 1.0), (1e-6, 1.0)),
+        rng=np.random.default_rng(seed),
+        polish=True,
+        tol=1e-9,
+        maxiter=100,
+        popsize=10,
     )
-    return round(best[0], 6), round(best[1], 6)
+    if not result.success and not math.isfinite(float(result.fun)):
+        return initial_alpha, initial_gamma
+    return round(float(result.x[0]), 6), round(float(result.x[1]), 6)
 
 
 # ── Public API ────────────────────────────────────────────────────────────────
@@ -237,32 +204,40 @@ def ses_forecast(
     demand: list[float],
     alpha: float = 0.5,
     forecast_length: int = 5,
+    initial_estimate_period: int = 3,
     optimise: bool = True,
+    seed: int = 42,
 ) -> dict:
-    """Run SES forecast, optionally optimising alpha with a GA.
+    """Run SES forecast, optionally optimising alpha by bounded SSE minimisation.
 
     Returns a dict ready to serialise as SESForecastResponse.
     """
     orders = [float(d) for d in demand]
+    initial_level = sum(orders[:initial_estimate_period]) / initial_estimate_period
 
     if optimise:
-        alpha = _optimise_alpha_ses(orders, initial_alpha=alpha)
+        alpha = _optimise_alpha_ses(
+            orders,
+            initial_alpha=alpha,
+            initial_level=initial_level,
+        )
 
-    breakdown = _ses_one_pass(orders, alpha)
+    breakdown = _ses_one_pass(orders, alpha, initial_level)
     sse = _sum_squared_errors(breakdown)
     se = _standard_error(sse, len(orders))
     mape = _mape(breakdown)
 
-    last_forecast = breakdown[-1]["forecast"] if breakdown else 0
-    future = _ses_forecast_extend(last_forecast, forecast_length)
+    final_level = breakdown[-1]["level"] if breakdown else 0
+    future = _ses_forecast_extend(final_level, forecast_length)
 
     # Regression on the forecast breakdown
     stats = _least_squares(breakdown)
-    regression = [round(stats["slope"] * i + stats["intercept"], 4) for i in range(12)]
+    regression = [round(stats["slope"] * i + stats["intercept"], 4) for i in range(1, 13)]
 
     return {
         "alpha": alpha,
         "alpha_optimised": optimise,
+        "seed": seed,
         "forecast": future,
         "forecast_breakdown": [
             {
@@ -275,6 +250,7 @@ def ses_forecast(
             for d in breakdown
         ],
         "mape": round(mape, 4),
+        "sse": round(sse, 4),
         "standard_error": round(se, 4),
         "regression": regression,
     }
@@ -287,8 +263,9 @@ def holts_forecast(
     forecast_length: int = 4,
     initial_period: int = 6,
     optimise: bool = True,
+    seed: int = 42,
 ) -> dict:
-    """Run Holt's Trend Corrected ES forecast, optionally optimising with GA.
+    """Run Holt's Trend Corrected ES with seeded numerical optimisation.
 
     Returns a dict ready to serialise as HoltsForecastResponse.
     """
@@ -296,7 +273,11 @@ def holts_forecast(
 
     if optimise:
         alpha, gamma = _optimise_alpha_gamma_htces(
-            orders, initial_alpha=alpha, initial_gamma=gamma
+            orders,
+            initial_alpha=alpha,
+            initial_gamma=gamma,
+            initial_period=initial_period,
+            seed=seed,
         )
 
     processed = [{"t": i + 1, "demand": d} for i, d in enumerate(orders)]
@@ -308,26 +289,20 @@ def holts_forecast(
     se = _standard_error(sse, len(orders), k=2)
     mape = _mape(breakdown)
 
-    # Extract last level & trend for future projection
-    if len(orders) >= 2 and breakdown:
-        last_level = alpha * orders[-1] + (1 - alpha) * breakdown[-1]["forecast"]
-        prev_level = alpha * orders[-2] + (1 - alpha) * (
-            breakdown[-2]["forecast"] if len(breakdown) >= 2 else intercept
-        )
-        last_trend = gamma * (last_level - prev_level) + (1 - gamma) * slope_val
-    else:
-        last_level = breakdown[-1]["forecast"] if breakdown else 0
-        last_trend = slope_val
+    # The final state is produced by the last Holt update.
+    last_level = breakdown[-1]["level"] if breakdown else intercept
+    last_trend = breakdown[-1]["trend"] if breakdown else slope_val
 
     future = _htces_forecast_extend(last_level, last_trend, forecast_length)
 
     bd_stats = _least_squares(breakdown)
-    regression = [round(bd_stats["slope"] * i + bd_stats["intercept"], 4) for i in range(12)]
+    regression = [round(bd_stats["slope"] * i + bd_stats["intercept"], 4) for i in range(1, 13)]
 
     return {
         "alpha": alpha,
         "gamma": gamma,
         "alpha_optimised": optimise,
+        "seed": seed,
         "forecast": future,
         "forecast_breakdown": [
             {

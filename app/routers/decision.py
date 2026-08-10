@@ -20,13 +20,14 @@ router = APIRouter(prefix="/api/v1/decision", tags=["Decision"])
         "quantitative criteria. Optionally computes cost-benefit ratios."
     ),
 )
-async def run_ahp(req: AHPRequest):
+def run_ahp(req: AHPRequest):
     result = analytical_hierarchy_process(
         criteria=req.criteria,
         criteria_scores=req.criteria_scores,
         options=req.options,
         option_scores=req.option_scores,
         quantitative_criteria=req.quantitative_criteria,
+        minimize_criteria=req.minimize_criteria,
         item_costs=req.item_costs,
     )
     return AHPResponse(**result)

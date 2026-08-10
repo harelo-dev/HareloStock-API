@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-
 from fastapi import APIRouter
 
 from app.models.inventory import (
@@ -22,14 +20,14 @@ def _sku_to_response(s) -> SkuAnalysisResult:
     """Convert internal SkuAnalysis to response schema."""
     return SkuAnalysisResult(
         sku_id=s.sku_id,
-        average_orders=s.average_orders,
-        standard_deviation=s.standard_deviation,
-        safety_stock=s.safety_stock,
-        demand_variability=s.demand_variability,
-        reorder_level=s.reorder_level,
-        reorder_quantity=s.reorder_quantity,
-        economic_order_quantity=s.economic_order_quantity,
-        economic_order_variable_cost=s.economic_order_variable_cost,
+        average_orders=round(s.average_orders, 4),
+        standard_deviation=round(s.standard_deviation, 4),
+        safety_stock=round(s.safety_stock, 4),
+        demand_variability=round(s.demand_variability, 4),
+        reorder_level=round(s.reorder_level, 4),
+        reorder_quantity=round(s.reorder_quantity, 4),
+        economic_order_quantity=round(s.economic_order_quantity, 4),
+        economic_order_variable_cost=round(s.economic_order_variable_cost, 2),
         abc_classification=s.abc_classification,
         xyz_classification=s.xyz_classification,
         abc_xyz_classification=s.abc_xyz_classification,
@@ -53,10 +51,15 @@ def _sku_to_response(s) -> SkuAnalysisResult:
         "ready for direct insertion into any database."
     ),
 )
-async def analyse_inventory(req: InventoryAnalysisRequest):
+def analyse_inventory(req: InventoryAnalysisRequest):
     skus_data = [s.model_dump() for s in req.skus]
     analysed, matrix = analyse_batch(
-        skus_data, req.z_value, req.reorder_cost, req.holding_cost_pct, req.currency
+        skus_data,
+        req.z_value,
+        req.reorder_cost,
+        req.holding_cost_pct,
+        req.currency,
+        req.periods_per_year,
     )
 
     return InventoryAnalysisResponse(
@@ -74,7 +77,7 @@ async def analyse_inventory(req: InventoryAnalysisRequest):
     summary="Analyse Single SKU",
     description="Analyse a single SKU from a dict of period-keyed demand values.",
 )
-async def analyse_single_sku(req: SingleSkuRequest):
+def analyse_single_sku(req: SingleSkuRequest):
     demand_values = list(req.demand.values())
     sku_data = {
         "sku_id": req.sku_id,
@@ -86,8 +89,13 @@ async def analyse_single_sku(req: SingleSkuRequest):
         "backlog": 0,
     }
     result = analyse_sku(
-        sku_data, req.z_value, req.reorder_cost, req.holding_cost_pct, req.currency
+        sku_data,
+        req.z_value,
+        req.reorder_cost,
+        req.holding_cost_pct,
+        req.currency,
+        req.periods_per_year,
     )
-    # Run ABC/XYZ on single item (will classify as A/X by default)
+    # Run ABC/XYZ on the single-item portfolio.
     classify_abc_xyz([result])
     return _sku_to_response(result)

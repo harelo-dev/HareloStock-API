@@ -8,8 +8,7 @@ The formulas are faithful to the original supplychainpy library
 from __future__ import annotations
 
 import math
-from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 
@@ -31,6 +30,7 @@ class SkuAnalysis:
     z_value: float
     reorder_cost: float
     holding_cost_pct: float
+    periods_per_year: int
 
     # Computed fields — populated by `analyse()`
     average_orders: float = 0.0
@@ -73,26 +73,32 @@ def _safety_stock(z: float, std_dev: float, lead_time: float) -> float:
 
 
 def _reorder_level(lead_time: float, avg_orders: float, safety: float) -> float:
-    return math.sqrt(lead_time) * avg_orders + safety
+    """Reorder point for demand and lead time expressed in the same period."""
+    return lead_time * avg_orders + safety
 
 
 def _fixed_order_quantity(
-    reorder_cost: float, avg_orders: float, unit_cost: float, holding_pct: float
+    reorder_cost: float, annual_demand: float, unit_cost: float, holding_pct: float
 ) -> float:
+    """Standard Wilson EOQ, retained as the fixed reorder quantity."""
     denom = unit_cost * holding_pct
     if denom <= 0:
         return 0.0
-    return math.sqrt(2 * reorder_cost * avg_orders / denom)
+    return math.sqrt(2 * reorder_cost * annual_demand / denom)
 
 
 def _variable_cost(
-    total_orders: float, reorder_cost: float, order_size: float,
-    unit_cost: float, holding_cost: float,
+    total_orders: float,
+    reorder_cost: float,
+    order_size: float,
+    unit_cost: float,
+    holding_cost: float,
 ) -> float:
     if order_size <= 0:
         return 0.0
     rc = (total_orders * reorder_cost) / order_size
-    hc = order_size * unit_cost * holding_cost
+    # Average cycle stock is Q / 2.
+    hc = (order_size / 2.0) * unit_cost * holding_cost
     return rc + hc
 
 
@@ -102,51 +108,34 @@ def _eoq_order_size(
     denom = unit_cost * holding_cost
     if denom <= 0:
         return 0.0
-    return math.sqrt((total_orders * reorder_cost * 2.0) / denom) * 0.4
+    return math.sqrt((total_orders * reorder_cost * 2.0) / denom)
 
 
 def _minimum_variable_cost(
     total_orders: float, reorder_cost: float, unit_cost: float, holding_cost: float
 ) -> float:
-    """Walk order quantities upward from the initial estimate until variable cost
-    starts increasing, then return the minimum found."""
-    step = 0.2
+    """Return ordering plus holding cost at the analytical EOQ minimum."""
     order_qty = _eoq_order_size(total_orders, reorder_cost, unit_cost, holding_cost)
     if order_qty <= 0:
         return 0.0
-    prev_vc = _variable_cost(total_orders, reorder_cost, order_qty, unit_cost, holding_cost)
-    for _ in range(1000):  # safety cap
-        order_qty += order_qty * step
-        vc = _variable_cost(total_orders, reorder_cost, order_qty, unit_cost, holding_cost)
-        if vc > prev_vc:
-            return prev_vc
-        prev_vc = vc
-    return prev_vc
+    return _variable_cost(total_orders, reorder_cost, order_qty, unit_cost, holding_cost)
 
 
 def _economic_order_quantity_calc(
     total_orders: float, reorder_cost: float, unit_cost: float, holding_cost: float
 ) -> float:
-    """Walk order quantities upward until variable cost starts increasing,
-    then return the order quantity that produced the minimum."""
-    step = 0.2
-    order_qty = _eoq_order_size(total_orders, reorder_cost, unit_cost, holding_cost)
-    if order_qty <= 0:
-        return 0.0
-    prev_vc = _variable_cost(total_orders, reorder_cost, order_qty, unit_cost, holding_cost)
-    prev_qty = order_qty
-    for _ in range(1000):
-        order_qty += order_qty * step
-        vc = _variable_cost(total_orders, reorder_cost, order_qty, unit_cost, holding_cost)
-        if vc > prev_vc:
-            return prev_qty
-        prev_vc = vc
-        prev_qty = order_qty
-    return prev_qty
+    """Return the analytical Wilson EOQ."""
+    return _eoq_order_size(total_orders, reorder_cost, unit_cost, holding_cost)
 
 
-def analyse_sku(sku: dict[str, Any], z_value: float, reorder_cost: float,
-                holding_cost_pct: float, currency: str) -> SkuAnalysis:
+def analyse_sku(
+    sku: dict[str, Any],
+    z_value: float,
+    reorder_cost: float,
+    holding_cost_pct: float,
+    currency: str,
+    periods_per_year: int = 12,
+) -> SkuAnalysis:
     """Analyse a single SKU and return a fully-populated SkuAnalysis."""
     demand = [float(d) for d in sku["demand"]]
     unit_cost = float(sku["unit_cost"])
@@ -157,15 +146,16 @@ def analyse_sku(sku: dict[str, Any], z_value: float, reorder_cost: float,
 
     total_orders = sum(demand)
     avg = total_orders / len(demand) if demand else 0.0
+    annual_demand = avg * periods_per_year
     std = _std_dev(demand, avg)
     safety = _safety_stock(z_value, std, lead_time)
     dv = std / avg if avg else 0.0
     rol = _reorder_level(lead_time, avg, safety)
-    roq = _fixed_order_quantity(reorder_cost, avg, unit_cost, holding_cost_pct)
+    roq = _fixed_order_quantity(reorder_cost, annual_demand, unit_cost, holding_cost_pct)
     rev = total_orders * retail_price
 
-    eoq = _economic_order_quantity_calc(total_orders, reorder_cost, unit_cost, holding_cost_pct)
-    mvc = _minimum_variable_cost(total_orders, reorder_cost, unit_cost, holding_cost_pct)
+    eoq = _economic_order_quantity_calc(annual_demand, reorder_cost, unit_cost, holding_cost_pct)
+    mvc = _minimum_variable_cost(annual_demand, reorder_cost, unit_cost, holding_cost_pct)
 
     # Excess / shortage relative to reorder band
     upper_band = rol + (rol - safety)
@@ -191,15 +181,16 @@ def analyse_sku(sku: dict[str, Any], z_value: float, reorder_cost: float,
         z_value=z_value,
         reorder_cost=reorder_cost,
         holding_cost_pct=holding_cost_pct,
-        average_orders=round(avg, 4),
-        standard_deviation=round(std, 4),
-        safety_stock=round(safety, 4),
-        demand_variability=round(dv, 4),
-        reorder_level=round(rol, 4),
-        reorder_quantity=round(roq, 4),
-        economic_order_quantity=round(eoq, 4),
-        economic_order_variable_cost=round(mvc, 2),
-        revenue=round(rev, 2),
+        periods_per_year=periods_per_year,
+        average_orders=avg,
+        standard_deviation=std,
+        safety_stock=safety,
+        demand_variability=dv,
+        reorder_level=rol,
+        reorder_quantity=roq,
+        economic_order_quantity=eoq,
+        economic_order_variable_cost=mvc,
+        revenue=rev,
         total_orders=total_orders,
         excess_stock=excess,
         shortages=shortages,
@@ -216,7 +207,13 @@ def classify_abc_xyz(skus: list[SkuAnalysis]) -> dict[str, int]:
     """
     total_revenue = sum(s.revenue for s in skus)
     if total_revenue <= 0:
-        return _empty_matrix()
+        for s in skus:
+            s.abc_classification = "C"
+            s.xyz_classification = "X" if s.standard_deviation == 0 else "Z"
+        matrix = _empty_matrix()
+        for s in skus:
+            matrix[s.abc_xyz_classification] += 1
+        return matrix
 
     # Percentage revenue
     for s in skus:
@@ -226,14 +223,13 @@ def classify_abc_xyz(skus: list[SkuAnalysis]) -> dict[str, int]:
     sorted_skus = sorted(skus, key=lambda s: s.revenue, reverse=True)
     cumulative = 0.0
     for s in sorted_skus:
+        previous_cumulative = cumulative
         cumulative += s.percentage_revenue
         s.cumulative_percentage = cumulative
-
-    # ABC classification
-    for s in sorted_skus:
-        if s.cumulative_percentage <= 0.80:
+        # Classify the item that crosses a boundary in the class it contributed to.
+        if previous_cumulative < 0.80:
             s.abc_classification = "A"
-        elif s.cumulative_percentage <= 0.90:
+        elif previous_cumulative < 0.90:
             s.abc_classification = "B"
         else:
             s.abc_classification = "C"
@@ -264,12 +260,23 @@ def _empty_matrix() -> dict[str, int]:
 
 
 def analyse_batch(
-    skus_data: list[dict], z_value: float, reorder_cost: float,
-    holding_cost_pct: float, currency: str
+    skus_data: list[dict],
+    z_value: float,
+    reorder_cost: float,
+    holding_cost_pct: float,
+    currency: str,
+    periods_per_year: int = 12,
 ) -> tuple[list[SkuAnalysis], dict[str, int]]:
     """Analyse a batch of SKUs and return (analysed_list, abc_xyz_matrix)."""
     analysed = [
-        analyse_sku(s, z_value, reorder_cost, holding_cost_pct, currency)
+        analyse_sku(
+            s,
+            z_value,
+            reorder_cost,
+            holding_cost_pct,
+            currency,
+            periods_per_year,
+        )
         for s in skus_data
     ]
     matrix = classify_abc_xyz(analysed)

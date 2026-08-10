@@ -26,7 +26,7 @@ router = APIRouter(prefix="/api/v1/simulation", tags=["Simulation"])
         "over configurable periods and runs."
     ),
 )
-async def simulate_monte_carlo(req: MonteCarloRequest):
+def simulate_monte_carlo(req: MonteCarloRequest):
     skus_data = [s.model_dump() for s in req.skus]
     summaries = run_monte_carlo(
         skus_data=skus_data,
@@ -36,10 +36,13 @@ async def simulate_monte_carlo(req: MonteCarloRequest):
         currency=req.currency,
         runs=req.runs,
         period_length=req.period_length,
+        periods_per_year=req.periods_per_year,
+        seed=req.seed,
     )
     return MonteCarloResponse(
         runs=req.runs,
         period_length=req.period_length,
+        seed=req.seed,
         sku_summaries=[SkuFrameSummary(**s) for s in summaries],
     )
 
@@ -53,7 +56,7 @@ async def simulate_monte_carlo(req: MonteCarloRequest):
         "the target service level. Uses Monte Carlo simulation at each iteration."
     ),
 )
-async def optimise(req: OptimiseServiceLevelRequest):
+def optimise(req: OptimiseServiceLevelRequest):
     skus_data = [s.model_dump() for s in req.skus]
     result = optimise_service_level(
         skus_data=skus_data,
@@ -65,5 +68,8 @@ async def optimise(req: OptimiseServiceLevelRequest):
         period_length=req.period_length,
         target_service_level=req.target_service_level,
         safety_stock_increase_pct=req.safety_stock_increase_pct,
+        periods_per_year=req.periods_per_year,
+        seed=req.seed,
+        max_iterations=req.max_iterations,
     )
     return OptimiseServiceLevelResponse(**result)
