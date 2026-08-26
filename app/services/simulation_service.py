@@ -1,18 +1,120 @@
-"""Monte Carlo simulation engine — pure Python re-implementation of supplychainpy's
-SetupMonteCarlo and simulation window logic for Python 3.13.
+"""Monte Carlo simulation engine with non-Gaussian distribution fitting for Python 3.13.
 
 Simulates inventory transactions over configurable periods and runs,
-generating random demand from each SKU's normal distribution (mean, std dev).
+generating random demand from Normal, Poisson, Gamma, or Log-Normal distributions.
 """
 
 from __future__ import annotations
 
 import math
 import statistics
+from typing import Any
 
 import numpy as np
+from scipy import stats
 
 from app.services.inventory_service import SkuAnalysis, analyse_sku
+
+
+# ── Distribution Fitting & Sampling ──────────────────────────────────────────
+
+
+def fit_demand_distribution(
+    demand: list[float], distribution_type: str = "auto"
+) -> tuple[str, dict[str, float]]:
+    """Fit historical demand to Normal, Poisson, Gamma, or Log-Normal."""
+    vals = [float(d) for d in demand if d >= 0]
+    if not vals:
+        return "normal", {"loc": 10.0, "scale": 2.0}
+
+    mean_val = float(np.mean(vals))
+    std_val = float(np.std(vals)) if len(vals) > 1 else max(1.0, mean_val * 0.2)
+
+    if distribution_type == "normal":
+        return "normal", {"loc": mean_val, "scale": max(1e-4, std_val)}
+    if distribution_type == "poisson":
+        return "poisson", {"lam": max(1e-4, mean_val)}
+    if distribution_type == "gamma":
+        if mean_val > 0 and std_val > 0:
+            shape = (mean_val / std_val) ** 2
+            scale = (std_val ** 2) / mean_val
+            return "gamma", {"shape": max(1e-4, shape), "scale": max(1e-4, scale)}
+        return "normal", {"loc": mean_val, "scale": max(1e-4, std_val)}
+    if distribution_type == "lognormal":
+        pos_vals = [x for x in vals if x > 0]
+        if len(pos_vals) >= 2:
+            log_vals = [math.log(x) for x in pos_vals]
+            mu = float(np.mean(log_vals))
+            sigma = float(np.std(log_vals))
+            return "lognormal", {"mean": mu, "sigma": max(1e-4, sigma)}
+        return "normal", {"loc": mean_val, "scale": max(1e-4, std_val)}
+
+    # Auto-fit: Compare KS-test p-values across candidates
+    candidates: dict[str, tuple[dict[str, float], float]] = {}
+
+    # Candidate 1: Normal
+    try:
+        norm_dist = stats.norm(loc=mean_val, scale=max(1e-4, std_val))
+        candidates["normal"] = (
+            {"loc": mean_val, "scale": max(1e-4, std_val)},
+            float(stats.kstest(vals, norm_dist.cdf).pvalue),
+        )
+    except Exception:
+        candidates["normal"] = ({"loc": mean_val, "scale": max(1e-4, std_val)}, 0.0)
+
+    # Candidate 2: Poisson (if mean > 0)
+    if mean_val > 0:
+        try:
+            pois_dist = stats.poisson(mu=max(1e-4, mean_val))
+            candidates["poisson"] = (
+                {"lam": max(1e-4, mean_val)},
+                float(stats.kstest(vals, pois_dist.cdf).pvalue),
+            )
+        except Exception:
+            pass
+
+    # Candidate 3: Gamma
+    if mean_val > 0 and std_val > 0:
+        try:
+            shape = (mean_val / std_val) ** 2
+            scale = (std_val ** 2) / mean_val
+            gamma_dist = stats.gamma(a=max(1e-4, shape), scale=max(1e-4, scale))
+            candidates["gamma"] = (
+                {"shape": max(1e-4, shape), "scale": max(1e-4, scale)},
+                float(stats.kstest(vals, gamma_dist.cdf).pvalue),
+            )
+        except Exception:
+            pass
+
+    # Candidate 4: LogNormal (if all positive)
+    if all(x > 0 for x in vals) and len(vals) >= 2:
+        try:
+            log_vals = [math.log(x) for x in vals]
+            mu = float(np.mean(log_vals))
+            sigma = float(np.std(log_vals))
+            lognorm_dist = stats.lognorm(s=max(1e-4, sigma), scale=math.exp(mu))
+            candidates["lognormal"] = (
+                {"mean": mu, "sigma": max(1e-4, sigma)},
+                float(stats.kstest(vals, lognorm_dist.cdf).pvalue),
+            )
+        except Exception:
+            pass
+
+    # Choose candidate with highest p-value (closest to empirical)
+    best_dist = max(candidates.keys(), key=lambda k: candidates[k][1])
+    return best_dist, candidates[best_dist][0]
+
+
+def _sample_demand(dist_name: str, params: dict[str, float], rng: np.random.Generator) -> float:
+    """Sample one non-negative demand value from the fitted distribution."""
+    if dist_name == "poisson":
+        return float(rng.poisson(params["lam"]))
+    if dist_name == "gamma":
+        return float(rng.gamma(params["shape"], params["scale"]))
+    if dist_name == "lognormal":
+        return float(rng.lognormal(params["mean"], params["sigma"]))
+    # default normal
+    return max(0.0, float(rng.normal(params["loc"], params["scale"])))
 
 
 # ── Single-period simulation step ────────────────────────────────────────────
@@ -26,12 +128,16 @@ def _simulate_period(
     pending_orders: list[dict],
     po_counter: int,
     rng: np.random.Generator,
+    dist_name: str = "normal",
+    dist_params: dict[str, float] | None = None,
 ) -> dict:
     """Simulate one period's inventory transactions for one SKU."""
-    # Random demand from normal distribution
-    demand = max(0.0, float(rng.normal(sku.average_orders, sku.standard_deviation)))
+    if dist_params is None:
+        dist_params = {"loc": sku.average_orders, "scale": sku.standard_deviation}
 
-    # Check for deliveries arriving this period (lead_time periods after PO raised)
+    demand = _sample_demand(dist_name, dist_params, rng)
+
+    # Check for deliveries arriving this period
     delivery = 0.0
     received_ids = []
     remaining_orders = []
@@ -51,7 +157,6 @@ def _simulate_period(
     backlog = (previous_backlog - backlog_fulfilled) + (demand - demand_fulfilled)
     shortage_units = demand - demand_fulfilled
 
-    # Revenue from what was actually sold
     revenue = sold * sku.retail_price
     shortage_cost = shortage_units * sku.unit_cost
 
@@ -105,7 +210,11 @@ def _simulate_period(
 
 
 def _run_sku_simulation(
-    sku: SkuAnalysis, period_length: int, rng: np.random.Generator
+    sku: SkuAnalysis,
+    period_length: int,
+    rng: np.random.Generator,
+    dist_name: str = "normal",
+    dist_params: dict[str, float] | None = None,
 ) -> list[dict]:
     """Simulate `period_length` periods for a single SKU."""
     records = []
@@ -115,7 +224,9 @@ def _run_sku_simulation(
     po_counter = 0
 
     for period in range(1, period_length + 1):
-        result = _simulate_period(sku, period, opening, backlog, pending, po_counter, rng)
+        result = _simulate_period(
+            sku, period, opening, backlog, pending, po_counter, rng, dist_name, dist_params
+        )
         records.append(result)
         opening = result["_closing_stock"]
         backlog = result["_backlog"]
@@ -129,9 +240,16 @@ def _run_one_iteration(
     analysed_skus: list[SkuAnalysis],
     period_length: int,
     rng: np.random.Generator,
+    sku_distributions: dict[str, tuple[str, dict[str, float]]],
 ) -> list[list[dict]]:
     """One full simulation run across all SKUs."""
-    return [_run_sku_simulation(sku, period_length, rng) for sku in analysed_skus]
+    result = []
+    for sku in analysed_skus:
+        dist_name, dist_params = sku_distributions.get(
+            sku.sku_id, ("normal", {"loc": sku.average_orders, "scale": sku.standard_deviation})
+        )
+        result.append(_run_sku_simulation(sku, period_length, rng, dist_name, dist_params))
+    return result
 
 
 # ── Summarisation ─────────────────────────────────────────────────────────────
@@ -174,9 +292,11 @@ def _summarise_sku_run(records: list[dict]) -> dict:
     }
 
 
-def _aggregate_across_runs(all_run_summaries: list[list[dict]]) -> list[dict]:
+def _aggregate_across_runs(
+    all_run_summaries: list[list[dict]],
+    sku_distributions: dict[str, tuple[str, dict[str, float]]],
+) -> list[dict]:
     """Aggregate per-SKU summaries across all runs into frame summaries."""
-    # Group by sku_id
     sku_runs: dict[str, list[dict]] = {}
     for run_summaries in all_run_summaries:
         for summary in run_summaries:
@@ -206,10 +326,12 @@ def _aggregate_across_runs(all_run_summaries: list[list[dict]]) -> list[dict]:
         min_backlog = [s["minimum_backlog"] for s in summaries]
 
         avg_service = statistics.mean(service_levels) if service_levels else 1.0
+        fitted_name = sku_distributions.get(sku_id, ("normal", {}))[0]
 
         frame.append(
             {
                 "sku_id": sku_id,
+                "fitted_distribution": fitted_name,
                 "average_opening_stock": round(statistics.mean(avg_opening), 2),
                 "average_closing_stock": round(statistics.mean(avg_closing), 2),
                 "average_quantity_sold": round(statistics.mean(total_sold), 2),
@@ -243,13 +365,14 @@ def _simulate_runs(
     runs: int,
     period_length: int,
     rng: np.random.Generator,
+    sku_distributions: dict[str, tuple[str, dict[str, float]]],
 ) -> list[dict]:
     all_run_summaries: list[list[dict]] = []
     for _run in range(runs):
-        run_result = _run_one_iteration(analysed, period_length, rng)
+        run_result = _run_one_iteration(analysed, period_length, rng, sku_distributions)
         run_summaries = [_summarise_sku_run(sku_records) for sku_records in run_result]
         all_run_summaries.append(run_summaries)
-    return _aggregate_across_runs(all_run_summaries)
+    return _aggregate_across_runs(all_run_summaries, sku_distributions)
 
 
 def run_monte_carlo(
@@ -261,13 +384,10 @@ def run_monte_carlo(
     runs: int,
     period_length: int,
     periods_per_year: int = 12,
+    distribution: str = "auto",
     seed: int = 42,
 ) -> list[dict]:
-    """Run Monte Carlo simulation.
-
-    Returns a list of SkuFrameSummary dicts (one per SKU, aggregated across runs).
-    """
-    # Analyse SKUs first
+    """Run Monte Carlo simulation with specified or fitted distribution."""
     analysed = [
         analyse_sku(
             s,
@@ -279,7 +399,14 @@ def run_monte_carlo(
         )
         for s in skus_data
     ]
-    return _simulate_runs(analysed, runs, period_length, np.random.default_rng(seed))
+
+    sku_distributions = {
+        s["sku_id"]: fit_demand_distribution(s["demand"], distribution) for s in skus_data
+    }
+
+    return _simulate_runs(
+        analysed, runs, period_length, np.random.default_rng(seed), sku_distributions
+    )
 
 
 def optimise_service_level(
@@ -293,13 +420,11 @@ def optimise_service_level(
     target_service_level: float,
     safety_stock_increase_pct: float,
     periods_per_year: int = 12,
+    distribution: str = "auto",
     seed: int = 42,
     max_iterations: int = 20,
 ) -> dict:
-    """Iteratively increase safety stock until all SKUs meet the target service level.
-
-    Returns optimisation result with final SKU states.
-    """
+    """Iteratively increase safety stock until all SKUs meet the target service level."""
     analysed = [
         analyse_sku(
             s,
@@ -313,17 +438,21 @@ def optimise_service_level(
     ]
     original_safety_stock = {sku.sku_id: sku.safety_stock for sku in analysed}
 
+    sku_distributions = {
+        s["sku_id"]: fit_demand_distribution(s["demand"], distribution) for s in skus_data
+    }
+
     iteration = 0
     converged = False
     frame: list[dict] = []
 
     for iteration in range(1, max_iterations + 1):
-        # Reuse the same random stream to compare policies fairly.
         frame = _simulate_runs(
             analysed,
             runs,
             period_length,
             np.random.default_rng(seed),
+            sku_distributions,
         )
         underperforming = {
             summary["sku_id"]
@@ -334,7 +463,6 @@ def optimise_service_level(
             converged = True
             break
 
-        # Do not return a policy changed after its final evaluation.
         if iteration == max_iterations:
             break
 

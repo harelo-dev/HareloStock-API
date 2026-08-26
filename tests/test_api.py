@@ -8,7 +8,15 @@ def test_health_and_openapi(client):
     assert health.status_code == 200
     assert health.json()["version"] == "0.3.0"
     assert schema.status_code == 200
-    assert len(schema.json()["paths"]) == 19
+    paths = schema.json()["paths"]
+    assert len(paths) == 26
+    assert "/api/v1/inventory/lot-sizing" in paths
+    assert "/api/v1/inventory/multi-echelon" in paths
+    assert "/api/v1/optimization/network-flow" in paths
+    assert "/api/v1/forecast/croston" in paths
+    assert "/api/v1/forecast/classify-demand" in paths
+    assert "/api/v1/forecast/holt-winters" in paths
+    assert "/api/v1/forecast/auto" in paths
 
 
 def test_inventory_sample_smoke(client):

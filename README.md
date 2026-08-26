@@ -29,11 +29,18 @@ default for local use. A PostgreSQL deployment can set, for example,
 |--------|------|-------------|
 | `GET` | `/health` | Health check |
 | `GET` | `/api/v1/sample-data` | Get sample SKU data for testing |
-| `POST` | `/api/v1/inventory/analyse` | Batch inventory analysis (ABC/XYZ, EOQ, safety stock) |
+| `POST` | `/api/v1/inventory/analyse` | Batch inventory analysis (ABC/XYZ, EOQ, stochastic lead time, Fill Rate G(k), safety stock) |
 | `POST` | `/api/v1/inventory/sku` | Single SKU analysis |
+| `POST` | `/api/v1/inventory/lot-sizing` | Dynamic lot-sizing optimization (Wagner-Whitin, Silver-Meal, LUC, PPB, L4L) |
+| `POST` | `/api/v1/inventory/multi-echelon` | Multi-Echelon Inventory Optimization (MEIO) & Bullwhip analysis |
+| `POST` | `/api/v1/optimization/network-flow` | Capacitated Facility Location & Transportation optimization (MILP) |
 | `POST` | `/api/v1/forecast/ses` | Simple Exponential Smoothing forecast |
 | `POST` | `/api/v1/forecast/holts` | Holt's Trend Corrected ES forecast |
-| `POST` | `/api/v1/simulation/monte-carlo` | Monte Carlo inventory simulation |
+| `POST` | `/api/v1/forecast/holt-winters` | Holt-Winters Triple ES (Additive / Multiplicative seasonality) |
+| `POST` | `/api/v1/forecast/auto` | Auto-forecast model selection based on AICc |
+| `POST` | `/api/v1/forecast/croston` | Intermittent demand forecast (Croston / SBA / TSB) |
+| `POST` | `/api/v1/forecast/classify-demand` | Demand pattern classification (Syntetos-Boylan-Croston matrix) |
+| `POST` | `/api/v1/simulation/monte-carlo` | Monte Carlo inventory simulation (Normal, Poisson, Gamma, Log-Normal) |
 | `POST` | `/api/v1/simulation/optimise-service-level` | Optimise safety stock for target service level |
 | `POST` | `/api/v1/decision/ahp` | Analytical Hierarchy Process |
 
@@ -53,29 +60,36 @@ default for local use. A PostgreSQL deployment can set, for example,
 | `GET` | `/api/v1/runs/{run_id}/result` | Retrieve the full result and its summary |
 
 Dataset kinds map to engines as follows: `inventory` supports inventory analysis,
-Monte Carlo, and service-level optimisation; `time_series` supports SES and Holt;
-`decision` supports AHP. A `generic` dataset can be used by any engine. Scenario
-parameters override top-level dataset fields when a run starts.
+dynamic lot sizing, multi-echelon inventory (MEIO), Monte Carlo, and service-level optimisation;
+`time_series` supports SES, Holt, Holt-Winters, Auto-forecast, Croston/SBA, and demand classification;
+`decision` supports AHP and MILP network optimization. A `generic` dataset can be used by any engine.
+Scenario parameters override top-level dataset fields when a run starts.
 
 Each run stores its exact request, dataset checksum, engine version, random seed,
 timestamps, status, and any failure message. Changing a scenario never changes a
 previous run.
 
-## Quick Example
+## Quick Examples
 
 ```bash
-# Analyse inventory
-curl -X POST http://localhost:8000/api/v1/inventory/analyse \
+# Capacitated Facility Location & Transportation (MILP with HiGHS)
+curl -X POST http://localhost:8000/api/v1/optimization/network-flow \
   -H "Content-Type: application/json" \
   -d '{
-    "skus": [{
-      "sku_id": "WIDGET-01",
-      "demand": [150, 180, 200, 170, 160, 190, 210, 195, 185, 175, 165, 200],
-      "unit_cost": 50, "lead_time": 3, "retail_price": 120,
-      "quantity_on_hand": 500, "backlog": 0
-    }],
-    "z_value": 1.28, "reorder_cost": 100, "currency": "USD",
-    "periods_per_year": 12
+    "facilities": [
+      {"id": "DC-NORTH", "name": "Northern DC", "fixed_cost": 2000, "capacity": 500},
+      {"id": "DC-SOUTH", "name": "Southern DC", "fixed_cost": 1500, "capacity": 400}
+    ],
+    "customers": [
+      {"id": "STORE-A", "name": "Store A", "demand": 300},
+      {"id": "STORE-B", "name": "Store B", "demand": 250}
+    ],
+    "transport_costs": [
+      {"facility_id": "DC-NORTH", "customer_id": "STORE-A", "unit_cost": 2.0},
+      {"facility_id": "DC-NORTH", "customer_id": "STORE-B", "unit_cost": 6.0},
+      {"facility_id": "DC-SOUTH", "customer_id": "STORE-A", "unit_cost": 5.0},
+      {"facility_id": "DC-SOUTH", "customer_id": "STORE-B", "unit_cost": 2.5}
+    ]
   }'
 ```
 
@@ -83,12 +97,22 @@ curl -X POST http://localhost:8000/api/v1/inventory/analyse \
 
 - Demand observations and `lead_time` use the same period unit.
 - `periods_per_year` annualises mean demand for EOQ.
-- Safety stock: `z × σ × √lead_time`.
+- Combined lead time standard deviation (Silver-Pyke-Peterson): `σ_DL = √(lead_time × σ_D² + mean_demand² × σ_L²)`.
+- Safety stock (Cycle Service Level Type-1): `z × σ_DL`.
+- Safety stock (Fill Rate Type-2): Root search solving `G(k) = (1 - β) × Q / σ_DL` where `G(k) = φ(k) - k(1 - Φ(k))`, returning `k × σ_DL`.
 - Reorder point: `mean demand × lead_time + safety stock`.
 - Wilson EOQ: `√(2 × annual demand × reorder cost / annual unit holding cost)`.
+- Wagner-Whitin: Exact dynamic programming solving `f(t) = min_{1 ≤ j ≤ t} { f(j-1) + S + Σ_{k=j}^t (k-j) × h × d_k }`.
+- Silver-Meal: Heuristic minimizing average cost per period `(S + total holding) / span`.
+- Network Optimization: Mixed-Integer Linear Program (MILP) solving $\min \sum c_{ij} x_{ij} + \sum f_i y_i$ subject to $\sum_j x_{ij} \le \text{Cap}_i y_i$ and $\sum_i x_{ij} \ge D_j$ using the HiGHS solver via `scipy.optimize.milp`.
+- Multi-Echelon Inventory (MEIO): Guaranteed Service Model (GSM) with net replenishment lead times $L_k^{\text{net}} = \max(0, T_k + SI_k - S_k)$, demand variance aggregation $\sigma_{\text{pooled}} = \sqrt{\sum \sigma_i^2}$, and Bullwhip effect indices $1 + 2L/p + 2L^2/p^2$.
 - SES projects from the final updated level and minimises SSE over `0 < alpha <= 1`.
 - Holt projects from its final level and trend; optional optimisation uses seeded differential evolution.
-- Monte Carlo `service_level` is the immediate unit fill rate. `stockout_percentage` is reported separately.
+- Holt-Winters computes level, trend, and seasonal components (additive or multiplicative) with AIC/AICc model scoring.
+- Auto-forecast evaluates candidate ETS models and selects the minimum AICc model.
+- Intermittent demand uses Croston, Syntetos-Boylan Approximation (SBA), or Teunter-Syntetos-Babai (TSB).
+- Demand categorization matrix classifies series into Smooth, Intermittent, Erratic, or Lumpy based on `ADI` and `CV²`.
+- Monte Carlo generates demand from Normal, Poisson, Gamma, or Log-Normal distributions, supporting automatic distribution fitting via Kolmogorov-Smirnov test.
 - Monte Carlo and evolutionary optimisation accept `seed`; identical inputs and seeds produce identical results.
 - Service-level optimisation reports `converged`, achieved service per SKU, and `target_met`.
 - Quantitative AHP criteria can be inverted with `minimize_criteria`.

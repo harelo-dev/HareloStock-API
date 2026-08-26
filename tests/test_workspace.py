@@ -199,6 +199,58 @@ def test_archived_resources_cannot_start_new_work(client):
             "optimised_skus",
         ),
         (
+            ScenarioEngine.FORECAST_CROSTON,
+            {"demand": [0, 10, 0, 15, 0, 8]},
+            "forecast",
+        ),
+        (
+            ScenarioEngine.DEMAND_CLASSIFICATION,
+            {"demand": [0, 10, 0, 15, 0, 8]},
+            "category",
+        ),
+        (
+            ScenarioEngine.LOT_SIZING,
+            {"demand": [20, 50, 10, 10, 50], "ordering_cost": 100.0, "holding_cost_per_period": 1.0},
+            "plans",
+        ),
+        (
+            ScenarioEngine.FORECAST_HOLT_WINTERS,
+            {
+                "demand": [
+                    100, 120, 150, 80,
+                    105, 125, 155, 82,
+                ],
+                "seasonal_periods": 4,
+                "optimise": False,
+            },
+            "forecast",
+        ),
+        (
+            ScenarioEngine.FORECAST_AUTO,
+            {"demand": [10, 20, 30, 40, 50, 60], "seasonal_periods": 4},
+            "selected_model",
+        ),
+        (
+            ScenarioEngine.MULTI_ECHELON_INVENTORY,
+            {
+                "nodes": [
+                    {"node_id": "CDC", "node_name": "CDC", "tier": 1, "lead_time": 2.0, "holding_cost": 1.0},
+                    {"node_id": "S1", "node_name": "Store 1", "tier": 2, "lead_time": 1.0, "holding_cost": 2.0, "demand_mean": 50.0, "demand_std": 10.0, "parent_node_id": "CDC"},
+                ],
+                "target_service_level": 0.95,
+            },
+            "nodes",
+        ),
+        (
+            ScenarioEngine.NETWORK_OPTIMIZATION,
+            {
+                "facilities": [{"id": "F1", "name": "F1", "fixed_cost": 100.0, "capacity": 500.0}],
+                "customers": [{"id": "C1", "name": "C1", "demand": 50.0}],
+                "transport_costs": [{"facility_id": "F1", "customer_id": "C1", "unit_cost": 2.0}],
+            },
+            "shipments",
+        ),
+        (
             ScenarioEngine.AHP,
             {
                 "criteria": ["quality", "delivery"],

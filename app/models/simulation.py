@@ -1,6 +1,8 @@
-"""Pydantic schemas for Monte Carlo simulation endpoints."""
+"""Pydantic schemas for Monte Carlo simulation endpoints with distribution fitting."""
 
 from __future__ import annotations
+
+from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
 
@@ -12,7 +14,7 @@ from app.models.inventory import SkuData
 
 
 class MonteCarloRequest(ApiModel):
-    """Run a Monte Carlo inventory simulation."""
+    """Run a Monte Carlo inventory simulation with custom or fitted demand distributions."""
 
     skus: list[SkuData] = Field(..., min_length=1, max_length=500)
     z_value: float = Field(1.28, gt=0, le=4.0)
@@ -21,6 +23,10 @@ class MonteCarloRequest(ApiModel):
     currency: str = Field("USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
     runs: int = Field(10, ge=1, le=1000, description="Number of simulation runs.")
     period_length: int = Field(12, ge=1, le=52, description="Periods per run window.")
+    distribution: Literal["auto", "normal", "poisson", "gamma", "lognormal"] = Field(
+        "auto",
+        description="Demand distribution: 'auto' (selects best fit via KS-test), 'normal', 'poisson', 'gamma', or 'lognormal'.",
+    )
     periods_per_year: int = Field(12, ge=1, le=366)
     seed: int = Field(42, ge=0, le=4_294_967_295)
 
@@ -49,6 +55,9 @@ class OptimiseServiceLevelRequest(ApiModel):
     currency: str = Field("USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
     runs: int = Field(10, ge=1, le=500)
     period_length: int = Field(12, ge=1, le=52)
+    distribution: Literal["auto", "normal", "poisson", "gamma", "lognormal"] = Field(
+        "auto", description="Demand distribution."
+    )
     target_service_level: float = Field(
         0.95, gt=0, le=1.0, description="Service level target (e.g. 0.95 = 95%)."
     )
@@ -122,6 +131,7 @@ class SkuFrameSummary(ApiModel):
     """Aggregated summary across ALL runs for one SKU."""
 
     sku_id: str
+    fitted_distribution: str = "normal"
     average_opening_stock: float
     average_closing_stock: float
     average_quantity_sold: float

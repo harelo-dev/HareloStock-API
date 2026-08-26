@@ -3,8 +3,8 @@
 FastAPI service for supply-chain analysis with both direct calculation endpoints
 and persistent projects, datasets, scenarios, executions, and results.
 
-Based on algorithms from supplychainpy (BSD-3, Kevin Fasusi), re-implemented
-for modern Python.
+Based on algorithms from supplychainpy (BSD-3, Kevin Fasusi) and advanced
+Operations Research models, re-implemented for modern Python.
 """
 
 from __future__ import annotations
@@ -16,7 +16,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.db import create_schema
-from app.routers import decision, forecast, health, inventory, simulation, workspace
+from app.routers import (
+    decision,
+    forecast,
+    health,
+    inventory,
+    lot_sizing,
+    meio,
+    optimization,
+    simulation,
+    workspace,
+)
 
 
 @asynccontextmanager
@@ -31,11 +41,11 @@ app = FastAPI(
     title=settings.app_name,
     version=settings.app_version,
     description=(
-        "**Motor de cálculos Supply Chain** — análisis, pronósticos, simulación y "
-        "soporte de decisiones con trazabilidad persistente.\n\n"
+        "**Motor de cálculos Supply Chain** — análisis, pronósticos, simulación, "
+        "dimensionamiento dinámico de lotes, optimización de redes MILP, MEIO y soporte de decisiones con trazabilidad persistente.\n\n"
         "Use los endpoints de Workspace para organizar proyectos, datasets y escenarios; "
         "cada ejecución conserva las entradas, la versión del motor, la semilla y el resultado.\n\n"
-        "Basado en algoritmos de "
+        "Basado en investigación de operaciones y "
         "[supplychainpy](https://github.com/KevinFasusi/supplychainpy)."
     ),
     lifespan=lifespan,
@@ -53,7 +63,10 @@ app.add_middleware(
 
 app.include_router(health.router)
 app.include_router(inventory.router)
+app.include_router(lot_sizing.router)
+app.include_router(meio.router)
 app.include_router(forecast.router)
 app.include_router(simulation.router)
+app.include_router(optimization.router)
 app.include_router(decision.router)
 app.include_router(workspace.router)

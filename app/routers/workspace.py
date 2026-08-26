@@ -42,10 +42,17 @@ DbSession = Annotated[Session, Depends(get_db)]
 
 ENGINE_DATASET_KINDS: dict[ScenarioEngine, DatasetKind] = {
     ScenarioEngine.INVENTORY_ANALYSIS: DatasetKind.INVENTORY,
+    ScenarioEngine.LOT_SIZING: DatasetKind.INVENTORY,
+    ScenarioEngine.MULTI_ECHELON_INVENTORY: DatasetKind.INVENTORY,
     ScenarioEngine.MONTE_CARLO: DatasetKind.INVENTORY,
     ScenarioEngine.SERVICE_LEVEL_OPTIMISATION: DatasetKind.INVENTORY,
     ScenarioEngine.FORECAST_SES: DatasetKind.TIME_SERIES,
     ScenarioEngine.FORECAST_HOLTS: DatasetKind.TIME_SERIES,
+    ScenarioEngine.FORECAST_HOLT_WINTERS: DatasetKind.TIME_SERIES,
+    ScenarioEngine.FORECAST_AUTO: DatasetKind.TIME_SERIES,
+    ScenarioEngine.FORECAST_CROSTON: DatasetKind.TIME_SERIES,
+    ScenarioEngine.DEMAND_CLASSIFICATION: DatasetKind.TIME_SERIES,
+    ScenarioEngine.NETWORK_OPTIMIZATION: DatasetKind.DECISION,
     ScenarioEngine.AHP: DatasetKind.DECISION,
 }
 

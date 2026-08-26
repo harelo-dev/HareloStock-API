@@ -31,10 +31,17 @@ class DatasetKind(StrEnum):
 
 class ScenarioEngine(StrEnum):
     INVENTORY_ANALYSIS = "inventory_analysis"
+    LOT_SIZING = "lot_sizing"
+    MULTI_ECHELON_INVENTORY = "multi_echelon_inventory"
     FORECAST_SES = "forecast_ses"
     FORECAST_HOLTS = "forecast_holts"
+    FORECAST_HOLT_WINTERS = "forecast_holt_winters"
+    FORECAST_AUTO = "forecast_auto"
+    FORECAST_CROSTON = "forecast_croston"
+    DEMAND_CLASSIFICATION = "demand_classification"
     MONTE_CARLO = "monte_carlo"
     SERVICE_LEVEL_OPTIMISATION = "service_level_optimisation"
+    NETWORK_OPTIMIZATION = "network_optimization"
     AHP = "ahp"
 
 

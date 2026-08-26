@@ -21,9 +21,9 @@ router = APIRouter(prefix="/api/v1/simulation", tags=["Simulation"])
     response_model=MonteCarloResponse,
     summary="Monte Carlo Simulation",
     description=(
-        "Run a Monte Carlo inventory simulation. Generates random demand from each SKU's "
-        "normal distribution and simulates transactions (stock movements, POs, backlog, revenue) "
-        "over configurable periods and runs."
+        "Run a Monte Carlo inventory simulation with distribution fitting (Normal, Poisson, Gamma, Log-Normal). "
+        "Simulates multi-period inventory transactions (stock movements, POs, backlog, unit fill rate) "
+        "across configurable runs."
     ),
 )
 def simulate_monte_carlo(req: MonteCarloRequest):
@@ -37,6 +37,7 @@ def simulate_monte_carlo(req: MonteCarloRequest):
         runs=req.runs,
         period_length=req.period_length,
         periods_per_year=req.periods_per_year,
+        distribution=req.distribution,
         seed=req.seed,
     )
     return MonteCarloResponse(
@@ -69,6 +70,7 @@ def optimise(req: OptimiseServiceLevelRequest):
         target_service_level=req.target_service_level,
         safety_stock_increase_pct=req.safety_stock_increase_pct,
         periods_per_year=req.periods_per_year,
+        distribution=req.distribution,
         seed=req.seed,
         max_iterations=req.max_iterations,
     )

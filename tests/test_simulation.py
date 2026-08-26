@@ -1,6 +1,12 @@
 from __future__ import annotations
 
-from app.services.simulation_service import optimise_service_level, run_monte_carlo
+import pytest
+
+from app.services.simulation_service import (
+    fit_demand_distribution,
+    optimise_service_level,
+    run_monte_carlo,
+)
 
 
 def _sku(demand: list[float] | None = None, quantity_on_hand: float = 50) -> dict:
@@ -49,6 +55,33 @@ def test_service_level_is_a_bounded_fill_rate():
 
     assert 0 <= summary["service_level"] <= 1
     assert 0 <= summary["stockout_percentage"] <= 1
+
+
+def test_non_gaussian_distributions_and_fitting():
+    # Fit Poisson on low-count discrete demands
+    dist_p, params_p = fit_demand_distribution([1, 2, 0, 1, 3, 0, 2], distribution_type="poisson")
+    assert dist_p == "poisson"
+    assert "lam" in params_p
+
+    # Fit Gamma
+    dist_g, params_g = fit_demand_distribution([5, 12, 18, 25, 30], distribution_type="gamma")
+    assert dist_g == "gamma"
+    assert "shape" in params_g
+
+    # Run Monte Carlo with Gamma distribution
+    summary_g = run_monte_carlo(
+        [_sku([5, 12, 18, 25, 30])],
+        1.28,
+        100,
+        0.25,
+        "USD",
+        runs=3,
+        period_length=6,
+        distribution="gamma",
+        seed=101,
+    )[0]
+    assert summary_g["fitted_distribution"] == "gamma"
+    assert 0 <= summary_g["service_level"] <= 1.0
 
 
 def test_optimiser_reports_non_convergence_and_final_service():

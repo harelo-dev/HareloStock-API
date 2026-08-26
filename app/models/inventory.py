@@ -13,7 +13,7 @@ from app.models.base import ApiModel
 
 
 class SkuData(ApiModel):
-    """A single SKU row — mirrors the CSV format from supplychainpy."""
+    """A single SKU row — mirrors the CSV format from supplychainpy with stochastic extensions."""
 
     sku_id: str = Field(..., min_length=1, max_length=100, examples=["KR202-209"])
     demand: list[float] = Field(
@@ -25,6 +25,12 @@ class SkuData(ApiModel):
     )
     unit_cost: float = Field(..., gt=0, examples=[1001])
     lead_time: float = Field(..., gt=0, examples=[2])
+    lead_time_std_dev: float = Field(
+        0.0,
+        ge=0,
+        description="Standard deviation of lead time for stochastic supplier variability.",
+        examples=[0.5],
+    )
     retail_price: float = Field(..., gt=0, examples=[5000])
     quantity_on_hand: float = Field(0, ge=0, examples=[1003])
     backlog: float = Field(0, ge=0, examples=[10])
@@ -49,7 +55,13 @@ class InventoryAnalysisRequest(ApiModel):
     """Batch analysis request for one or more SKUs."""
 
     skus: list[SkuData] = Field(..., min_length=1, max_length=1000)
-    z_value: float = Field(1.28, gt=0, le=4.0, description="Service level z-value.")
+    z_value: float = Field(1.28, gt=0, le=4.0, description="Service level z-value (Type-1).")
+    target_fill_rate: float | None = Field(
+        None,
+        gt=0.0,
+        lt=1.0,
+        description="Optional Type-2 target unit fill rate (beta) calculated via Normal Loss Function G(k).",
+    )
     reorder_cost: float = Field(400, gt=0, description="Cost to place one reorder.")
     holding_cost_pct: float = Field(
         0.25, gt=0, le=1.0, description="Holding cost as % of unit cost."
@@ -103,9 +115,11 @@ class SingleSkuRequest(ApiModel):
     )
     unit_cost: float = Field(..., gt=0)
     lead_time: float = Field(..., gt=0)
+    lead_time_std_dev: float = Field(0.0, ge=0)
     retail_price: float = Field(..., gt=0)
     reorder_cost: float = Field(400, gt=0)
     z_value: float = Field(1.28, gt=0, le=4.0)
+    target_fill_rate: float | None = Field(None, gt=0.0, lt=1.0)
     quantity_on_hand: float = Field(0, ge=0)
     holding_cost_pct: float = Field(0.25, gt=0, le=1.0)
     currency: str = Field("USD", min_length=3, max_length=3, pattern=r"^[A-Z]{3}$")
@@ -143,7 +157,11 @@ class SkuAnalysisResult(ApiModel):
     sku_id: str
     average_orders: float
     standard_deviation: float
+    combined_lead_time_std_dev: float = 0.0
     safety_stock: float
+    fill_rate_safety_stock: float | None = None
+    implied_fill_rate: float = 1.0
+    service_level_type: str = "cycle"
     demand_variability: float
     reorder_level: float
     reorder_quantity: float = Field(

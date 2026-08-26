@@ -22,7 +22,13 @@ def _sku_to_response(s) -> SkuAnalysisResult:
         sku_id=s.sku_id,
         average_orders=round(s.average_orders, 4),
         standard_deviation=round(s.standard_deviation, 4),
+        combined_lead_time_std_dev=round(s.combined_lead_time_std_dev, 4),
         safety_stock=round(s.safety_stock, 4),
+        fill_rate_safety_stock=(
+            round(s.fill_rate_safety_stock, 4) if s.fill_rate_safety_stock is not None else None
+        ),
+        implied_fill_rate=round(s.implied_fill_rate, 4),
+        service_level_type=s.service_level_type,
         demand_variability=round(s.demand_variability, 4),
         reorder_level=round(s.reorder_level, 4),
         reorder_quantity=round(s.reorder_quantity, 4),
@@ -46,9 +52,9 @@ def _sku_to_response(s) -> SkuAnalysisResult:
     response_model=InventoryAnalysisResponse,
     summary="Analyse Inventory (Batch)",
     description=(
-        "Analyse one or more SKUs. Returns safety stock, EOQ, reorder levels, "
-        "ABC/XYZ classification, and more — all in a flat, portable format "
-        "ready for direct insertion into any database."
+        "Analyse one or more SKUs with deterministic or stochastic lead times, "
+        "Type-1 (Cycle) and Type-2 (Fill Rate) safety stocks, EOQ, reorder levels, "
+        "and ABC/XYZ classification."
     ),
 )
 def analyse_inventory(req: InventoryAnalysisRequest):
@@ -60,6 +66,7 @@ def analyse_inventory(req: InventoryAnalysisRequest):
         req.holding_cost_pct,
         req.currency,
         req.periods_per_year,
+        req.target_fill_rate,
     )
 
     return InventoryAnalysisResponse(
@@ -84,6 +91,7 @@ def analyse_single_sku(req: SingleSkuRequest):
         "demand": demand_values,
         "unit_cost": req.unit_cost,
         "lead_time": req.lead_time,
+        "lead_time_std_dev": req.lead_time_std_dev,
         "retail_price": req.retail_price,
         "quantity_on_hand": req.quantity_on_hand,
         "backlog": 0,
@@ -95,6 +103,7 @@ def analyse_single_sku(req: SingleSkuRequest):
         req.holding_cost_pct,
         req.currency,
         req.periods_per_year,
+        req.target_fill_rate,
     )
     # Run ABC/XYZ on the single-item portfolio.
     classify_abc_xyz([result])
