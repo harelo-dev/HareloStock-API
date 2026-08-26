@@ -1,10 +1,7 @@
 from __future__ import annotations
 
-import pytest
-
 from app.services.lot_sizing_service import (
     lot_for_lot,
-    run_lot_sizing,
     silver_meal,
     wagner_whitin,
 )
@@ -58,3 +55,13 @@ def test_lot_sizing_api_comparison(client):
     assert data["cost_savings_vs_l4l"] > 0
     assert data["total_demand"] == 270.0
     assert data["periods"] == 10
+
+
+def test_lot_sizing_includes_unit_purchase_cost_in_absolute_totals():
+    result = wagner_whitin([10, 20, 10], S=100.0, h=1.0, unit_cost=10.0)
+
+    assert result["total_purchase_cost"] == 400.0
+    assert result["total_cost"] == (
+        result["total_ordering_cost"] + result["total_holding_cost"] + result["total_purchase_cost"]
+    )
+    assert sum(item["purchase_cost"] for item in result["schedule"]) == 400.0

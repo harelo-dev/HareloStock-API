@@ -10,7 +10,6 @@ from app.services.inventory_service import (
     analyse_batch,
     analyse_sku,
     classify_abc_xyz,
-    combined_lead_time_std_dev,
     inverse_unit_normal_loss,
     unit_normal_loss,
 )
@@ -53,9 +52,21 @@ def test_inventory_uses_dimensionally_consistent_rop_and_wilson_eoq():
 
 def test_stochastic_lead_time_increases_safety_stock():
     # Deterministic lead time (std_dev = 0)
-    det_res = analyse_sku(_sku(lead_time_std_dev=0.0), z_value=1.65, reorder_cost=100, holding_cost_pct=0.25, currency="USD")
+    det_res = analyse_sku(
+        _sku(lead_time_std_dev=0.0),
+        z_value=1.65,
+        reorder_cost=100,
+        holding_cost_pct=0.25,
+        currency="USD",
+    )
     # Stochastic lead time (std_dev = 1.0 period)
-    stoch_res = analyse_sku(_sku(lead_time_std_dev=1.0), z_value=1.65, reorder_cost=100, holding_cost_pct=0.25, currency="USD")
+    stoch_res = analyse_sku(
+        _sku(lead_time_std_dev=1.0),
+        z_value=1.65,
+        reorder_cost=100,
+        holding_cost_pct=0.25,
+        currency="USD",
+    )
 
     # With lead_time_std_dev = 1.0, combined sigma_dl must be strictly greater than deterministic
     assert stoch_res.combined_lead_time_std_dev > det_res.combined_lead_time_std_dev
@@ -66,7 +77,9 @@ def test_stochastic_lead_time_increases_safety_stock():
     mean_d = 20.0
     std_d = math.sqrt(((10 - mean_d) ** 2 + (20 - mean_d) ** 2 + (30 - mean_d) ** 2) / 3)
     expected_sigma_dl = math.sqrt(2.0 * (std_d**2) + (mean_d**2) * (1.0**2))
-    assert stoch_res.combined_lead_time_std_dev == pytest.approx(round(expected_sigma_dl, 4), abs=1e-3)
+    assert stoch_res.combined_lead_time_std_dev == pytest.approx(
+        round(expected_sigma_dl, 4), abs=1e-3
+    )
 
 
 def test_unit_normal_loss_function_and_inversion():

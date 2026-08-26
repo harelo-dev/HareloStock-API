@@ -32,7 +32,7 @@ default for local use. A PostgreSQL deployment can set, for example,
 | `POST` | `/api/v1/inventory/analyse` | Batch inventory analysis (ABC/XYZ, EOQ, stochastic lead time, Fill Rate G(k), safety stock) |
 | `POST` | `/api/v1/inventory/sku` | Single SKU analysis |
 | `POST` | `/api/v1/inventory/lot-sizing` | Dynamic lot-sizing optimization (Wagner-Whitin, Silver-Meal, LUC, PPB, L4L) |
-| `POST` | `/api/v1/inventory/multi-echelon` | Multi-Echelon Inventory Optimization (MEIO) & Bullwhip analysis |
+| `POST` | `/api/v1/inventory/multi-echelon` | Coordinated multi-echelon safety-stock heuristic & theoretical bullwhip estimate |
 | `POST` | `/api/v1/optimization/network-flow` | Capacitated Facility Location & Transportation optimization (MILP) |
 | `POST` | `/api/v1/forecast/ses` | Simple Exponential Smoothing forecast |
 | `POST` | `/api/v1/forecast/holts` | Holt's Trend Corrected ES forecast |
@@ -103,16 +103,17 @@ curl -X POST http://localhost:8000/api/v1/optimization/network-flow \
 - Reorder point: `mean demand × lead_time + safety stock`.
 - Wilson EOQ: `√(2 × annual demand × reorder cost / annual unit holding cost)`.
 - Wagner-Whitin: Exact dynamic programming solving `f(t) = min_{1 ≤ j ≤ t} { f(j-1) + S + Σ_{k=j}^t (k-j) × h × d_k }`.
+- Lot sizing: reported total cost includes ordering, holding, and optional purchase/production cost. Purchase cost is constant across policies when unit cost is constant, so it does not change the optimal policy.
 - Silver-Meal: Heuristic minimizing average cost per period `(S + total holding) / span`.
-- Network Optimization: Mixed-Integer Linear Program (MILP) solving $\min \sum c_{ij} x_{ij} + \sum f_i y_i$ subject to $\sum_j x_{ij} \le \text{Cap}_i y_i$ and $\sum_i x_{ij} \ge D_j$ using the HiGHS solver via `scipy.optimize.milp`.
-- Multi-Echelon Inventory (MEIO): Guaranteed Service Model (GSM) with net replenishment lead times $L_k^{\text{net}} = \max(0, T_k + SI_k - S_k)$, demand variance aggregation $\sigma_{\text{pooled}} = \sqrt{\sum \sigma_i^2}$, and Bullwhip effect indices $1 + 2L/p + 2L^2/p^2$.
+- Network Optimization: Mixed-Integer Linear Program (MILP) solving $\min \sum c_{ij} x_{ij} + \sum f_i y_i$ subject to $\sum_j x_{ij} \le \text{Cap}_i y_i$ and $\sum_i x_{ij} \ge D_j$ using the HiGHS solver via `scipy.optimize.milp`. Only declared transport lanes are available; an unreachable demand produces an infeasible result.
+- Multi-Echelon Inventory (MEIO): coordinated safety-stock heuristic over a validated rooted tree. It applies deterministic internal service-time assumptions, independent-demand variance pooling, and a theoretical bullwhip approximation. It is not a full Guaranteed Service Model optimizer.
 - SES projects from the final updated level and minimises SSE over `0 < alpha <= 1`.
 - Holt projects from its final level and trend; optional optimisation uses seeded differential evolution.
-- Holt-Winters computes level, trend, and seasonal components (additive or multiplicative) with AIC/AICc model scoring.
-- Auto-forecast evaluates candidate ETS models and selects the minimum AICc model.
+- Holt-Winters computes level, trend, and seasonal components (additive or multiplicative) with AIC/AICc model scoring. AICc is returned as `null` when the sample is too short for the model's parameter count.
+- Auto-forecast evaluates only candidates with a valid AICc and selects the minimum AICc model.
 - Intermittent demand uses Croston, Syntetos-Boylan Approximation (SBA), or Teunter-Syntetos-Babai (TSB).
 - Demand categorization matrix classifies series into Smooth, Intermittent, Erratic, or Lumpy based on `ADI` and `CV²`.
-- Monte Carlo generates demand from Normal, Poisson, Gamma, or Log-Normal distributions, supporting automatic distribution fitting via Kolmogorov-Smirnov test.
+- Monte Carlo generates demand from Normal, Poisson, Gamma, or Log-Normal distributions. Automatic selection ranks fitted candidates by empirical CDF distance; it is a heuristic, not a goodness-of-fit test. Poisson is available only for integer demand observations.
 - Monte Carlo and evolutionary optimisation accept `seed`; identical inputs and seeds produce identical results.
 - Service-level optimisation reports `converged`, achieved service per SKU, and `target_met`.
 - Quantitative AHP criteria can be inverted with `minimize_criteria`.

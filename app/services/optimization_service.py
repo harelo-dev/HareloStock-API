@@ -39,13 +39,16 @@ def solve_capacitated_network_flow(
     fac_idx_map = {f["id"]: i for i, f in enumerate(facilities)}
     cust_idx_map = {c["id"]: j for j, c in enumerate(customers)}
 
-    # Build cost lookup matrix (m x n)
-    c_matrix = np.full((m, n), 1e6)  # high default cost if route is not defined
+    # Build cost and availability matrices. An omitted lane is unavailable; it is
+    # never converted into an artificial high-cost shipment.
+    c_matrix = np.zeros((m, n))
+    lane_available = np.zeros((m, n), dtype=bool)
     for lane in transport_costs:
         i = fac_idx_map.get(lane["facility_id"])
         j = cust_idx_map.get(lane["customer_id"])
         if i is not None and j is not None:
             c_matrix[i, j] = float(lane["unit_cost"])
+            lane_available[i, j] = True
 
     # Decision variables vector:
     # y_0 .. y_{m-1} (binary facility open indicators)
@@ -71,6 +74,10 @@ def solve_capacitated_network_flow(
     lb = np.zeros(num_vars)
     ub = np.full(num_vars, np.inf)
     ub[:m] = 1.0
+    for i in range(m):
+        for j in range(n):
+            if not lane_available[i, j]:
+                ub[m + i * n + j] = 0.0
     bounds = Bounds(lb=lb, ub=ub)
 
     # Constraints:
@@ -123,7 +130,9 @@ def solve_capacitated_network_flow(
     res = milp(c=c_obj, integrality=integrality, bounds=bounds, constraints=constraints)
 
     if not res.success:
-        status_str = "infeasible" if res.status == 2 else "failed"
+        status_str = (
+            "infeasible" if res.status == 2 else "unbounded" if res.status == 3 else "failed"
+        )
         return {
             "status": status_str,
             "total_cost": 0.0,
@@ -172,7 +181,7 @@ def solve_capacitated_network_flow(
         for j, c in enumerate(customers):
             qty = float(x_sol[i, j])
             if qty > 1e-4:
-                unit_c = c_matrix[i, j]
+                unit_c = float(c_matrix[i, j])
                 lane_cost = qty * unit_c
                 total_transport_cost += lane_cost
                 shipments.append(

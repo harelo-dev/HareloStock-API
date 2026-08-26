@@ -58,9 +58,7 @@ ENGINE_DATASET_KINDS: dict[ScenarioEngine, DatasetKind] = {
 
 
 def _canonical_json(value: dict[str, Any]) -> bytes:
-    return json.dumps(
-        value, sort_keys=True, separators=(",", ":"), allow_nan=False
-    ).encode("utf-8")
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
 
 
 def _dataset_checksum(payload: dict[str, Any]) -> str:
@@ -343,9 +341,7 @@ def execute_scenario(scenario_id: UUID, db: DbSession):
         output = execute_engine(engine, request_payload)
         summary = result_summary(engine, output)
     except ValidationError as exc:
-        errors = exc.errors(
-            include_url=False, include_context=False, include_input=False
-        )
+        errors = exc.errors(include_url=False, include_context=False, include_input=False)
         _mark_run_failed(db, run, json.dumps(errors))
         raise HTTPException(
             status_code=422,

@@ -10,30 +10,32 @@ Implements:
 
 from __future__ import annotations
 
-import math
 from typing import Any
 
 
 def _build_schedule_and_costs(
-    demand: list[float], order_quantities: list[float], S: float, h: float
+    demand: list[float], order_quantities: list[float], S: float, h: float, unit_cost: float = 0.0
 ) -> dict[str, Any]:
     """Given an order quantity array Q, compute inventory trace and costs."""
     schedule = []
     inventory = 0.0
     total_ordering = 0.0
     total_holding = 0.0
+    total_purchase = 0.0
     orders_count = 0
 
     for t, (d, q) in enumerate(zip(demand, order_quantities), 1):
         inventory = inventory + q - d
         ord_cost = S if q > 0 else 0.0
+        purchase_cost = q * unit_cost
         if q > 0:
             orders_count += 1
         hold_cost = max(0.0, inventory) * h
-        tot_period = ord_cost + hold_cost
+        tot_period = ord_cost + hold_cost + purchase_cost
 
         total_ordering += ord_cost
         total_holding += hold_cost
+        total_purchase += purchase_cost
 
         schedule.append(
             {
@@ -43,6 +45,7 @@ def _build_schedule_and_costs(
                 "ending_inventory": round(max(0.0, inventory), 2),
                 "ordering_cost": round(ord_cost, 2),
                 "holding_cost": round(hold_cost, 2),
+                "purchase_cost": round(purchase_cost, 2),
                 "total_cost": round(tot_period, 2),
             }
         )
@@ -56,16 +59,19 @@ def _build_schedule_and_costs(
         "total_orders_placed": orders_count,
         "total_ordering_cost": round(total_ordering, 2),
         "total_holding_cost": round(total_holding, 2),
-        "total_cost": round(total_ordering + total_holding, 2),
+        "total_purchase_cost": round(total_purchase, 2),
+        "total_cost": round(total_ordering + total_holding + total_purchase, 2),
         "average_inventory": round(avg_inv, 2),
     }
 
 
-def wagner_whitin(demand: list[float], S: float, h: float) -> dict[str, Any]:
+def wagner_whitin(
+    demand: list[float], S: float, h: float, unit_cost: float = 0.0
+) -> dict[str, Any]:
     """Wagner-Whitin exact dynamic programming lot-sizing algorithm."""
     n = len(demand)
     if n == 0:
-        return _build_schedule_and_costs([], [], S, h)
+        return _build_schedule_and_costs([], [], S, h, unit_cost)
 
     # f[t] is the minimal cost to satisfy demand for periods 1..t with ending inventory 0 at t
     f = [0.0] * (n + 1)
@@ -93,12 +99,12 @@ def wagner_whitin(demand: list[float], S: float, h: float) -> dict[str, Any]:
         orders[j - 1] = qty
         curr = j - 1
 
-    result = _build_schedule_and_costs(demand, orders, S, h)
+    result = _build_schedule_and_costs(demand, orders, S, h, unit_cost)
     result["method"] = "wagner_whitin"
     return result
 
 
-def silver_meal(demand: list[float], S: float, h: float) -> dict[str, Any]:
+def silver_meal(demand: list[float], S: float, h: float, unit_cost: float = 0.0) -> dict[str, Any]:
     """Silver-Meal forward heuristic lot-sizing algorithm."""
     n = len(demand)
     orders = [0.0] * n
@@ -131,12 +137,14 @@ def silver_meal(demand: list[float], S: float, h: float) -> dict[str, Any]:
         orders[i] = order_qty
         i += best_span
 
-    result = _build_schedule_and_costs(demand, orders, S, h)
+    result = _build_schedule_and_costs(demand, orders, S, h, unit_cost)
     result["method"] = "silver_meal"
     return result
 
 
-def least_unit_cost(demand: list[float], S: float, h: float) -> dict[str, Any]:
+def least_unit_cost(
+    demand: list[float], S: float, h: float, unit_cost: float = 0.0
+) -> dict[str, Any]:
     """Least Unit Cost (LUC) heuristic lot-sizing algorithm."""
     n = len(demand)
     orders = [0.0] * n
@@ -171,12 +179,14 @@ def least_unit_cost(demand: list[float], S: float, h: float) -> dict[str, Any]:
         orders[i] = order_qty
         i += best_span
 
-    result = _build_schedule_and_costs(demand, orders, S, h)
+    result = _build_schedule_and_costs(demand, orders, S, h, unit_cost)
     result["method"] = "least_unit_cost"
     return result
 
 
-def part_period_balancing(demand: list[float], S: float, h: float) -> dict[str, Any]:
+def part_period_balancing(
+    demand: list[float], S: float, h: float, unit_cost: float = 0.0
+) -> dict[str, Any]:
     """Part-Period Balancing (PPB) heuristic matching total holding cost to ordering cost."""
     n = len(demand)
     orders = [0.0] * n
@@ -209,15 +219,15 @@ def part_period_balancing(demand: list[float], S: float, h: float) -> dict[str, 
         orders[i] = order_qty
         i += best_span
 
-    result = _build_schedule_and_costs(demand, orders, S, h)
+    result = _build_schedule_and_costs(demand, orders, S, h, unit_cost)
     result["method"] = "part_period_balancing"
     return result
 
 
-def lot_for_lot(demand: list[float], S: float, h: float) -> dict[str, Any]:
+def lot_for_lot(demand: list[float], S: float, h: float, unit_cost: float = 0.0) -> dict[str, Any]:
     """Lot-for-Lot (L4L) ordering policy."""
     orders = [float(d) for d in demand]
-    result = _build_schedule_and_costs(demand, orders, S, h)
+    result = _build_schedule_and_costs(demand, orders, S, h, unit_cost)
     result["method"] = "lot_for_lot"
     return result
 
@@ -245,10 +255,12 @@ def run_lot_sizing(
     for m in selected_methods:
         func = LOT_SIZING_FUNCS.get(m)
         if func:
-            plans[m] = func(demand, ordering_cost, holding_cost_per_period)
+            plans[m] = func(demand, ordering_cost, holding_cost_per_period, unit_cost)
 
     # Always ensure L4L is computed to report savings
-    l4l_plan = plans.get("lot_for_lot") or lot_for_lot(demand, ordering_cost, holding_cost_per_period)
+    l4l_plan = plans.get("lot_for_lot") or lot_for_lot(
+        demand, ordering_cost, holding_cost_per_period, unit_cost
+    )
     l4l_cost = l4l_plan["total_cost"]
 
     optimal_method = min(plans.keys(), key=lambda k: plans[k]["total_cost"])

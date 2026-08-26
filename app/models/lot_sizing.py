@@ -30,10 +30,28 @@ class LotSizingRequest(ApiModel):
         examples=[1.0],
     )
     unit_cost: float = Field(
-        0.0, ge=0, description="Optional unit purchase or production cost.", examples=[10.0]
+        0.0,
+        ge=0,
+        description="Unit purchase or production cost included in reported total costs.",
+        examples=[10.0],
     )
-    methods: list[Literal["wagner_whitin", "silver_meal", "least_unit_cost", "lot_for_lot", "part_period_balancing"]] = Field(
-        default=["wagner_whitin", "silver_meal", "least_unit_cost", "lot_for_lot", "part_period_balancing"],
+    methods: list[
+        Literal[
+            "wagner_whitin",
+            "silver_meal",
+            "least_unit_cost",
+            "lot_for_lot",
+            "part_period_balancing",
+        ]
+    ] = Field(
+        default=[
+            "wagner_whitin",
+            "silver_meal",
+            "least_unit_cost",
+            "lot_for_lot",
+            "part_period_balancing",
+        ],
+        min_length=1,
         description="Methods to evaluate and compare.",
     )
 
@@ -56,6 +74,7 @@ class PeriodScheduleItem(ApiModel):
     ending_inventory: float
     ordering_cost: float
     holding_cost: float
+    purchase_cost: float
     total_cost: float
 
 
@@ -67,6 +86,7 @@ class LotSizingPlan(ApiModel):
     total_orders_placed: int
     total_ordering_cost: float
     total_holding_cost: float
+    total_purchase_cost: float
     total_cost: float
     average_inventory: float
 

@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import math
 from typing import Literal
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 
 from app.models.base import ApiModel
 
@@ -15,8 +14,12 @@ class Facility(ApiModel):
 
     id: str = Field(..., min_length=1, max_length=100, examples=["DC-NORTH"])
     name: str = Field(..., min_length=1, max_length=160, examples=["Northern Distribution Center"])
-    fixed_cost: float = Field(..., ge=0, description="Fixed setup or lease cost to keep facility open.", examples=[5000.0])
-    capacity: float = Field(..., gt=0, description="Maximum throughput capacity in units.", examples=[2000.0])
+    fixed_cost: float = Field(
+        ..., ge=0, description="Fixed setup or lease cost to keep facility open.", examples=[5000.0]
+    )
+    capacity: float = Field(
+        ..., gt=0, description="Maximum throughput capacity in units.", examples=[2000.0]
+    )
 
 
 class CustomerDemand(ApiModel):
@@ -24,7 +27,9 @@ class CustomerDemand(ApiModel):
 
     id: str = Field(..., min_length=1, max_length=100, examples=["STORE-01"])
     name: str = Field(..., min_length=1, max_length=160, examples=["Downtown Store"])
-    demand: float = Field(..., gt=0, description="Total units demanded in the planning horizon.", examples=[600.0])
+    demand: float = Field(
+        ..., gt=0, description="Total units demanded in the planning horizon.", examples=[600.0]
+    )
 
 
 class TransportLaneCost(ApiModel):
@@ -52,11 +57,22 @@ class NetworkOptimizationRequest(ApiModel):
         if len(cust_ids) != len(self.customers):
             raise ValueError("customer ids must be unique")
 
+        lane_pairs: set[tuple[str, str]] = set()
         for lane in self.transport_costs:
             if lane.facility_id not in fac_ids:
-                raise ValueError(f"transport lane facility_id '{lane.facility_id}' not found in facilities")
+                raise ValueError(
+                    f"transport lane facility_id '{lane.facility_id}' not found in facilities"
+                )
             if lane.customer_id not in cust_ids:
-                raise ValueError(f"transport lane customer_id '{lane.customer_id}' not found in customers")
+                raise ValueError(
+                    f"transport lane customer_id '{lane.customer_id}' not found in customers"
+                )
+            lane_pair = (lane.facility_id, lane.customer_id)
+            if lane_pair in lane_pairs:
+                raise ValueError(
+                    "transport_costs may contain only one cost per facility/customer pair"
+                )
+            lane_pairs.add(lane_pair)
 
         return self
 

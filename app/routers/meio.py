@@ -17,10 +17,11 @@ router = APIRouter(prefix="/api/v1/inventory", tags=["Inventory"])
 @router.post(
     "/multi-echelon",
     response_model=MultiEchelonResponse,
-    summary="Multi-Echelon Inventory Optimization (MEIO)",
+    summary="Coordinated Multi-Echelon Safety-Stock Analysis",
     description=(
-        "Optimise safety stock positioning across multi-tier distribution networks (Central DC -> Regional DCs -> Stores) "
-        "using the Guaranteed Service Model (GSM). Evaluates risk pooling savings and Bullwhip effect indices."
+        "Analyse safety-stock positioning across a rooted distribution network with a transparent "
+        "coordinated service-time heuristic. This endpoint is not a full Guaranteed Service Model solver; "
+        "risk-pooling savings assume independent demand and bullwhip values are theoretical estimates."
     ),
 )
 def optimize_multi_echelon(req: MultiEchelonRequest):
@@ -30,6 +31,7 @@ def optimize_multi_echelon(req: MultiEchelonRequest):
         currency=req.currency,
     )
     return MultiEchelonResponse(
+        methodology=result["methodology"],
         target_service_level=result["target_service_level"],
         z_value=result["z_value"],
         currency=result["currency"],

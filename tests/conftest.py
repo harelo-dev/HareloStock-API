@@ -25,9 +25,7 @@ def client() -> TestClient:
         cursor.execute("PRAGMA foreign_keys=ON")
         cursor.close()
 
-    testing_session = sessionmaker(
-        bind=test_engine, autoflush=False, expire_on_commit=False
-    )
+    testing_session = sessionmaker(bind=test_engine, autoflush=False, expire_on_commit=False)
     Base.metadata.create_all(test_engine)
 
     def override_get_db():

@@ -48,14 +48,20 @@ def _least_squares(values: list[dict]) -> dict:
     return {"slope": slope, "intercept": intercept}
 
 
-def compute_information_criteria(sse: float, n: int, k: int, errors: list[float] | None = None, actuals: list[float] | None = None) -> dict[str, float]:
+def compute_information_criteria(
+    sse: float,
+    n: int,
+    k: int,
+    errors: list[float] | None = None,
+    actuals: list[float] | None = None,
+) -> dict[str, float | None]:
     """Compute AIC, AICc, BIC, MAPE, MAE for a model with k parameters on n observations."""
     if n <= 0:
-        return {"aic": 0.0, "aicc": 0.0, "bic": 0.0, "sse": sse, "mape": 0.0, "mae": 0.0}
+        return {"aic": 0.0, "aicc": None, "bic": 0.0, "sse": sse, "mape": 0.0, "mae": 0.0}
 
     sigma2 = max(1e-10, sse / n)
     aic = 2 * k + n * math.log(sigma2)
-    aicc = aic + (2 * k * (k + 1)) / (n - k - 1) if (n - k - 1) > 0 else aic
+    aicc = aic + (2 * k * (k + 1)) / (n - k - 1) if (n - k - 1) > 0 else None
     bic = k * math.log(n) + n * math.log(sigma2)
 
     mape = 0.0
@@ -67,7 +73,7 @@ def compute_information_criteria(sse: float, n: int, k: int, errors: list[float]
 
     return {
         "aic": round(aic, 4),
-        "aicc": round(aicc, 4),
+        "aicc": round(aicc, 4) if aicc is not None else None,
         "bic": round(bic, 4),
         "sse": round(sse, 4),
         "mape": round(mape, 4),
@@ -234,7 +240,9 @@ def _hw_initial_components(
     if seasonality_type == "multiplicative":
         initial_factors = [orders[i] / l0 if l0 > 0 else 1.0 for i in range(m)]
         factor_sum = sum(initial_factors)
-        norm_factors = [f * (m / factor_sum) for f in initial_factors] if factor_sum > 0 else [1.0] * m
+        norm_factors = (
+            [f * (m / factor_sum) for f in initial_factors] if factor_sum > 0 else [1.0] * m
+        )
     else:  # additive
         initial_factors = [orders[i] - l0 for i in range(m)]
         factor_mean = sum(initial_factors) / m
@@ -255,36 +263,40 @@ def _hw_one_pass(
     if len(orders) < 2 * m:
         return []
 
-    l, b, s = _hw_initial_components(orders, m, seasonality_type)
-    seasonal_factors = list(s)
+    level, trend, initial_seasonal_factors = _hw_initial_components(orders, m, seasonality_type)
+    seasonal_factors = list(initial_seasonal_factors)
     breakdown = []
 
     for t, actual in enumerate(orders):
         s_prev = seasonal_factors[t]  # corresponding to s_{t-m}
 
         if seasonality_type == "multiplicative":
-            forecast = (l + b) * s_prev
+            forecast = (level + trend) * s_prev
             error = actual - forecast
-            l_new = alpha * (actual / s_prev if s_prev != 0 else actual) + (1.0 - alpha) * (l + b)
-            b_new = beta * (l_new - l) + (1.0 - beta) * b
-            s_new = gamma * (actual / l_new if l_new != 0 else s_prev) + (1.0 - gamma) * s_prev
+            level_new = alpha * (actual / s_prev if s_prev != 0 else actual) + (1.0 - alpha) * (
+                level + trend
+            )
+            trend_new = beta * (level_new - level) + (1.0 - beta) * trend
+            s_new = (
+                gamma * (actual / level_new if level_new != 0 else s_prev) + (1.0 - gamma) * s_prev
+            )
         else:  # additive
-            forecast = l + b + s_prev
+            forecast = level + trend + s_prev
             error = actual - forecast
-            l_new = alpha * (actual - s_prev) + (1.0 - alpha) * (l + b)
-            b_new = beta * (l_new - l) + (1.0 - beta) * b
-            s_new = gamma * (actual - l_new) + (1.0 - gamma) * s_prev
+            level_new = alpha * (actual - s_prev) + (1.0 - alpha) * (level + trend)
+            trend_new = beta * (level_new - level) + (1.0 - beta) * trend
+            s_new = gamma * (actual - level_new) + (1.0 - gamma) * s_prev
 
         seasonal_factors.append(s_new)
-        l, b = l_new, b_new
+        level, trend = level_new, trend_new
 
         breakdown.append(
             {
                 "period": t + 1,
                 "demand": round(actual, 4),
                 "forecast": round(forecast, 4),
-                "level": round(l, 4),
-                "trend": round(b, 4),
+                "level": round(level, 4),
+                "trend": round(trend, 4),
                 "season": round(s_new, 4),
                 "error": round(error, 4),
                 "squared_error": round(error**2, 4),
@@ -301,6 +313,7 @@ def _optimise_hw_params(
     seed: int = 42,
 ) -> tuple[float, float, float]:
     """Find optimal alpha, beta, gamma via Nelder-Mead / Powell bounded optimization."""
+
     def loss(params):
         a, b, g = params
         bd = _hw_one_pass(orders, m, a, b, g, seasonality_type)
@@ -354,7 +367,9 @@ def holt_winters_forecast(
 
     errors = [b["error"] for b in breakdown]
     actuals = [b["demand"] for b in breakdown]
-    metrics = compute_information_criteria(sse, len(orders), k=m + 3, errors=errors, actuals=actuals)
+    metrics = compute_information_criteria(
+        sse, len(orders), k=m + 3, errors=errors, actuals=actuals
+    )
 
     return {
         "seasonality_type": seasonality_type,
@@ -389,35 +404,43 @@ def auto_forecast(
     # 1. Simple Exponential Smoothing
     ses_res = ses_forecast(orders, forecast_length=forecast_length, optimise=True, seed=seed)
     ses_errors = [item["error"] for item in ses_res["forecast_breakdown"]]
-    ses_metrics = compute_information_criteria(ses_res["sse"], len(orders), k=2, errors=ses_errors, actuals=orders)
-    candidates.append({
-        "model_name": "SES",
-        "aicc": ses_metrics["aicc"],
-        "aic": ses_metrics["aic"],
-        "bic": ses_metrics["bic"],
-        "sse": ses_metrics["sse"],
-        "mape": ses_metrics["mape"],
-        "mae": ses_metrics["mae"],
-        "forecast": ses_res["forecast"],
-        "details": ses_res,
-    })
+    ses_metrics = compute_information_criteria(
+        ses_res["sse"], len(orders), k=2, errors=ses_errors, actuals=orders
+    )
+    candidates.append(
+        {
+            "model_name": "SES",
+            "aicc": ses_metrics["aicc"],
+            "aic": ses_metrics["aic"],
+            "bic": ses_metrics["bic"],
+            "sse": ses_metrics["sse"],
+            "mape": ses_metrics["mape"],
+            "mae": ses_metrics["mae"],
+            "forecast": ses_res["forecast"],
+            "details": ses_res,
+        }
+    )
 
     # 2. Holt Linear
     if len(orders) >= 6:
         holt_res = holts_forecast(orders, forecast_length=forecast_length, optimise=True, seed=seed)
         holt_errors = [item["error"] for item in holt_res["forecast_breakdown"]]
-        holt_metrics = compute_information_criteria(holt_res["sse"], len(orders), k=4, errors=holt_errors, actuals=orders)
-        candidates.append({
-            "model_name": "Holt Linear",
-            "aicc": holt_metrics["aicc"],
-            "aic": holt_metrics["aic"],
-            "bic": holt_metrics["bic"],
-            "sse": holt_metrics["sse"],
-            "mape": holt_metrics["mape"],
-            "mae": holt_metrics["mae"],
-            "forecast": holt_res["forecast"],
-            "details": holt_res,
-        })
+        holt_metrics = compute_information_criteria(
+            holt_res["sse"], len(orders), k=4, errors=holt_errors, actuals=orders
+        )
+        candidates.append(
+            {
+                "model_name": "Holt Linear",
+                "aicc": holt_metrics["aicc"],
+                "aic": holt_metrics["aic"],
+                "bic": holt_metrics["bic"],
+                "sse": holt_metrics["sse"],
+                "mape": holt_metrics["mape"],
+                "mae": holt_metrics["mae"],
+                "forecast": holt_res["forecast"],
+                "details": holt_res,
+            }
+        )
 
     # 3. Holt-Winters Additive & Multiplicative (if length >= 2 * seasonal_periods)
     if len(orders) >= 2 * seasonal_periods:
@@ -429,17 +452,20 @@ def auto_forecast(
             optimise=True,
             seed=seed,
         )
-        candidates.append({
-            "model_name": "Holt-Winters Additive",
-            "aicc": hw_add["metrics"]["aicc"],
-            "aic": hw_add["metrics"]["aic"],
-            "bic": hw_add["metrics"]["bic"],
-            "sse": hw_add["metrics"]["sse"],
-            "mape": hw_add["metrics"]["mape"],
-            "mae": hw_add["metrics"]["mae"],
-            "forecast": hw_add["forecast"],
-            "details": hw_add,
-        })
+        if hw_add["metrics"]["aicc"] is not None:
+            candidates.append(
+                {
+                    "model_name": "Holt-Winters Additive",
+                    "aicc": hw_add["metrics"]["aicc"],
+                    "aic": hw_add["metrics"]["aic"],
+                    "bic": hw_add["metrics"]["bic"],
+                    "sse": hw_add["metrics"]["sse"],
+                    "mape": hw_add["metrics"]["mape"],
+                    "mae": hw_add["metrics"]["mae"],
+                    "forecast": hw_add["forecast"],
+                    "details": hw_add,
+                }
+            )
 
         if all(d > 0 for d in orders):
             hw_mul = holt_winters_forecast(
@@ -450,35 +476,42 @@ def auto_forecast(
                 optimise=True,
                 seed=seed,
             )
-            candidates.append({
-                "model_name": "Holt-Winters Multiplicative",
-                "aicc": hw_mul["metrics"]["aicc"],
-                "aic": hw_mul["metrics"]["aic"],
-                "bic": hw_mul["metrics"]["bic"],
-                "sse": hw_mul["metrics"]["sse"],
-                "mape": hw_mul["metrics"]["mape"],
-                "mae": hw_mul["metrics"]["mae"],
-                "forecast": hw_mul["forecast"],
-                "details": hw_mul,
-            })
+            if hw_mul["metrics"]["aicc"] is not None:
+                candidates.append(
+                    {
+                        "model_name": "Holt-Winters Multiplicative",
+                        "aicc": hw_mul["metrics"]["aicc"],
+                        "aic": hw_mul["metrics"]["aic"],
+                        "bic": hw_mul["metrics"]["bic"],
+                        "sse": hw_mul["metrics"]["sse"],
+                        "mape": hw_mul["metrics"]["mape"],
+                        "mae": hw_mul["metrics"]["mae"],
+                        "forecast": hw_mul["forecast"],
+                        "details": hw_mul,
+                    }
+                )
 
     # 4. If intermittent, consider SBA
     if classification["category"] in {"intermittent", "lumpy"}:
         sba_res = croston_forecast(orders, variant="sba", forecast_length=forecast_length)
         sba_sse = sum(b["error"] ** 2 for b in sba_res["forecast_breakdown"])
         sba_errors = [b["error"] for b in sba_res["forecast_breakdown"]]
-        sba_metrics = compute_information_criteria(sba_sse, len(orders), k=2, errors=sba_errors, actuals=orders)
-        candidates.append({
-            "model_name": "Syntetos-Boylan (SBA)",
-            "aicc": sba_metrics["aicc"],
-            "aic": sba_metrics["aic"],
-            "bic": sba_metrics["bic"],
-            "sse": sba_metrics["sse"],
-            "mape": sba_metrics["mape"],
-            "mae": sba_metrics["mae"],
-            "forecast": sba_res["forecast"],
-            "details": sba_res,
-        })
+        sba_metrics = compute_information_criteria(
+            sba_sse, len(orders), k=2, errors=sba_errors, actuals=orders
+        )
+        candidates.append(
+            {
+                "model_name": "Syntetos-Boylan (SBA)",
+                "aicc": sba_metrics["aicc"],
+                "aic": sba_metrics["aic"],
+                "bic": sba_metrics["bic"],
+                "sse": sba_metrics["sse"],
+                "mape": sba_metrics["mape"],
+                "mae": sba_metrics["mae"],
+                "forecast": sba_res["forecast"],
+                "details": sba_res,
+            }
+        )
 
     # Pick candidate with lowest AICc
     best_candidate = min(candidates, key=lambda c: c["aicc"])
@@ -518,7 +551,9 @@ def classify_demand_pattern(
     total_periods = len(demand)
     non_zero = [float(d) for d in demand if d > 0]
     non_zero_count = len(non_zero)
-    zero_percentage = round((1.0 - (non_zero_count / total_periods)) * 100, 2) if total_periods else 0.0
+    zero_percentage = (
+        round((1.0 - (non_zero_count / total_periods)) * 100, 2) if total_periods else 0.0
+    )
 
     if non_zero_count == 0:
         return {

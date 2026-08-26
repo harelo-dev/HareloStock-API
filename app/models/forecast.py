@@ -84,13 +84,40 @@ class HoltWintersForecastRequest(ApiModel):
         min_length=8,
         max_length=520,
         description="Historical demand values (requires at least 2 full seasonal cycles).",
-        examples=[[
-            112, 118, 132, 129, 121, 135, 148, 148, 136, 119, 104, 118,
-            115, 126, 141, 135, 125, 149, 170, 170, 158, 133, 114, 140
-        ]],
+        examples=[
+            [
+                112,
+                118,
+                132,
+                129,
+                121,
+                135,
+                148,
+                148,
+                136,
+                119,
+                104,
+                118,
+                115,
+                126,
+                141,
+                135,
+                125,
+                149,
+                170,
+                170,
+                158,
+                133,
+                114,
+                140,
+            ]
+        ],
     )
     seasonal_periods: int = Field(
-        12, ge=2, le=52, description="Length of seasonal cycle (e.g. 12 for months, 4 for quarters)."
+        12,
+        ge=2,
+        le=52,
+        description="Length of seasonal cycle (e.g. 12 for months, 4 for quarters).",
     )
     seasonality_type: Literal["additive", "multiplicative"] = Field(
         "additive", description="'additive' or 'multiplicative' seasonality."
@@ -116,7 +143,9 @@ class HoltWintersForecastRequest(ApiModel):
                 f"Demand length ({len(self.demand)}) must be at least twice the seasonal periods ({2 * self.seasonal_periods})"
             )
         if self.seasonality_type == "multiplicative" and any(d <= 0 for d in self.demand):
-            raise ValueError("Multiplicative seasonality requires all demand values to be strictly positive")
+            raise ValueError(
+                "Multiplicative seasonality requires all demand values to be strictly positive"
+            )
         return self
 
 
@@ -238,7 +267,10 @@ class InformationCriteria(ApiModel):
     """Goodness-of-fit and information criteria."""
 
     aic: float
-    aicc: float
+    aicc: float | None = Field(
+        None,
+        description="Corrected AIC; unavailable when the sample is too short for the model's parameter count.",
+    )
     bic: float
     sse: float
     mape: float | None = None
@@ -319,7 +351,9 @@ class AutoForecastResponse(ApiModel):
 class DemandClassificationResponse(ApiModel):
     """Result of Syntetos-Boylan-Croston demand pattern classification."""
 
-    adi: float = Field(..., description="Average Demand Interval (periods / non-zero observations).")
+    adi: float = Field(
+        ..., description="Average Demand Interval (periods / non-zero observations)."
+    )
     cv2: float = Field(..., description="Squared coefficient of variation of non-zero demands.")
     category: Literal["smooth", "intermittent", "erratic", "lumpy"] = Field(
         ..., description="Demand quadrant classification."

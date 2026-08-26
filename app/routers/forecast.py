@@ -132,7 +132,9 @@ def forecast_holt_winters(req: HoltWintersForecastRequest):
         optimised=result["optimised"],
         seed=result["seed"],
         forecast=result["forecast"],
-        forecast_breakdown=[HoltWintersBreakdownItem(**item) for item in result["forecast_breakdown"]],
+        forecast_breakdown=[
+            HoltWintersBreakdownItem(**item) for item in result["forecast_breakdown"]
+        ],
         metrics=InformationCriteria(**result["metrics"]),
         mape=result.get("mape"),
         sse=result.get("sse"),
@@ -145,7 +147,8 @@ def forecast_holt_winters(req: HoltWintersForecastRequest):
     summary="Auto-Forecast (Optimal Model Selection by AICc)",
     description=(
         "Automatically evaluate multiple forecasting models (SES, Holt Linear, Holt-Winters, SBA) "
-        "and select the optimal model based on minimum corrected Akaike Information Criterion (AICc)."
+        "and select the model with the minimum valid corrected Akaike Information Criterion (AICc). "
+        "Candidates without a defined AICc are excluded."
     ),
 )
 def forecast_auto(req: AutoForecastRequest):

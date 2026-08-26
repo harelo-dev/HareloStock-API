@@ -59,9 +59,9 @@ class RunStatus(StrEnum):
 
 def validate_json_document(value: dict[str, Any], limit: int, label: str) -> dict[str, Any]:
     try:
-        encoded = json.dumps(
-            value, sort_keys=True, separators=(",", ":"), allow_nan=False
-        ).encode("utf-8")
+        encoded = json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode(
+            "utf-8"
+        )
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{label} must be finite, JSON-serializable data") from exc
     if len(encoded) > limit:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 
 from app.services.optimization_service import solve_capacitated_network_flow
 
@@ -47,6 +46,20 @@ def test_milp_infeasible_when_total_capacity_is_insufficient():
     assert res["status"] == "infeasible"
 
 
+def test_milp_does_not_create_shipments_on_undefined_lanes():
+    facilities = [
+        {"id": "FAC-LANE", "name": "Connected", "fixed_cost": 0.0, "capacity": 5.0},
+        {"id": "FAC-NOLANE", "name": "Disconnected", "fixed_cost": 0.0, "capacity": 5.0},
+    ]
+    customers = [{"id": "CUST-1", "name": "Market", "demand": 10.0}]
+    lanes = [{"facility_id": "FAC-LANE", "customer_id": "CUST-1", "unit_cost": 1.0}]
+
+    res = solve_capacitated_network_flow(facilities, customers, lanes)
+
+    assert res["status"] == "infeasible"
+    assert res["shipments"] == []
+
+
 def test_network_optimization_api_endpoint(client):
     response = client.post(
         "/api/v1/optimization/network-flow",
@@ -74,3 +87,19 @@ def test_network_optimization_api_endpoint(client):
     assert data["total_demand_satisfied"] == 550.0
     assert len(data["open_facilities"]) >= 1
     assert data["total_cost"] > 0
+
+
+def test_network_api_rejects_duplicate_lane_costs(client):
+    response = client.post(
+        "/api/v1/optimization/network-flow",
+        json={
+            "facilities": [{"id": "DC-1", "name": "DC", "fixed_cost": 10.0, "capacity": 100.0}],
+            "customers": [{"id": "STORE-1", "name": "Store", "demand": 10.0}],
+            "transport_costs": [
+                {"facility_id": "DC-1", "customer_id": "STORE-1", "unit_cost": 1.0},
+                {"facility_id": "DC-1", "customer_id": "STORE-1", "unit_cost": 2.0},
+            ],
+        },
+    )
+
+    assert response.status_code == 422

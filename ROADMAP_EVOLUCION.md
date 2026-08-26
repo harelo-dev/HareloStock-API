@@ -1,132 +1,134 @@
-# Roadmap de Evolución y Escalabilidad Estratégica — HareloStock
+# Roadmap de evolución técnica — HareloStock
 
-Este documento traza la visión técnica, científica, arquitectónica y de producto para la evolución continua de **HareloStock**, consolidándolo como una plataforma integral de **Supply Chain Analytics, Prescriptive Optimization y Operaciones Logísticas Inteligentes**.
+**Estado verificado:** 26 de agosto de 2026
+**Propósito:** priorizar una plataforma de decisiones de inventario confiable antes de ampliar el catálogo de algoritmos.
 
----
+## Principios de evolución
 
-## 1. Resumen de Capacidades Consolidadas (Fases 1, 2 y 3)
+1. Una recomendación solo es útil si es trazable, reproducible y factible bajo restricciones reales.
+2. Ningún modelo se promociona por novedad: debe superar baselines mediante backtesting sin fuga temporal y métricas operacionales.
+3. La seguridad, el aislamiento de datos, la observabilidad y la ejecución controlada preceden a las funciones costosas o expuestas a clientes.
+4. Las afirmaciones científicas deben describir exactamente el método implementado y sus supuestos.
 
-| Eje Científico / Operativo | Módulos y Modelos Implementados | Endpoint Principal |
-| :--- | :--- | :--- |
-| **Inventario Estocástico** | Lead time estocástico ($\sigma_{DL}$ Silver-Pyke-Peterson), Inversión Normal Loss $G(k)$ para Fill Rate Tipo 2 | `POST /api/v1/inventory/analyse` |
-| **Dimensionamiento Dinámico** | Wagner-Whitin (Programación Dinámica exacta), Silver-Meal, Least Unit Cost, Part-Period Balancing | `POST /api/v1/inventory/lot-sizing` |
-| **Pronósticos Avanzados** | Holt-Winters (Triple ES aditivo/multiplicativo), Auto-Forecast por $\text{AIC}_c$, Croston, SBA, TSB, Matriz SBC | `POST /api/v1/forecast/auto`<br/>`POST /api/v1/forecast/holt-winters` |
-| **Simulación Estocástica** | Monte Carlo multi-período con ajuste y muestreo de distribuciones (Normal, Poisson, Gamma, Log-Normal) vía KS-Test | `POST /api/v1/simulation/monte-carlo` |
-| **Optimización de Redes (MILP)** | Localización capacitada de plantas/CDs y transporte óptimo con solver HiGHS (`scipy.optimize.milp`) | `POST /api/v1/optimization/network-flow` |
-| **Multi-Eslabón (MEIO)** | Guaranteed Service Model (GSM), reducción de varianza por Risk Pooling y medición del Efecto Látigo | `POST /api/v1/inventory/multi-echelon` |
-| **Decisión Multicriterio** | Analytical Hierarchy Process (AHP) con Consistency Ratio ($CR$) e inversión de criterios | `POST /api/v1/decision/ahp` |
-| **Workspace Persistente** | 13 motores de cálculo, inmutabilidad SHA-256, snapshots de ejecución y resultados reproducibles | `POST /api/v1/scenarios/{id}/runs` |
+## Capacidades actuales verificadas
 
----
+| Área | Estado actual | Límites que deben conocerse |
+|---|---|---|
+| Inventario | EOQ, ROP, stock de seguridad con demanda y lead time variables, Fill Rate Tipo 2, ABC/XYZ. | Son modelos paramétricos de referencia; requieren unidades temporales coherentes y validación con datos reales. |
+| Lot sizing | Wagner-Whitin, Silver-Meal, LUC, PPB y L4L. El costo total incluye compra, ordenar y mantener. | El costo unitario constante no cambia la política óptima; no hay MOQ, packs, capacidad ni presupuesto. |
+| Pronóstico | SES, Holt, Holt-Winters, Croston/SBA/TSB y clasificación ADI–CV². | Auto-forecast usa AICc solo cuando es matemáticamente válido; aún falta backtesting rolling-origin para promover modelos. |
+| Simulación | Monte Carlo con Normal, Poisson, Gamma y Log-Normal. | La selección automática minimiza distancia ECDF como heurística, no es una prueba formal de ajuste. Poisson solo acepta observaciones enteras. |
+| Red logística | Localización capacitada y flujo de transporte MILP con HiGHS. | Solo las rutas declaradas son factibles; faltan multi-período, SLA, capacidad temporal y restricciones comerciales. |
+| Multi-eslabón | Heurística coordinada de safety stock en un árbol validado. | No es un solver Guaranteed Service Model (GSM); supone demanda independiente y tiempos internos deterministas. El bullwhip es una aproximación teórica, no una medición observada. |
+| Workspace | 13 motores, datasets inmutables con SHA-256, snapshots de solicitudes y resultados. | Sigue siendo síncrono, monotenancy y sin identidad/autorización. La versión de aplicación no sustituye un hash de código y dependencias. |
 
-## 2. Fases de Evolución Futura
+## Brechas que bloquean producción B2B
+
+- No existen autenticación, RBAC ni aislamiento por organización.
+- Los cálculos de simulación y MILP se ejecutan dentro de la solicitud HTTP; no hay colas, cancelación ni límites de tiempo por trabajo.
+- El despliegue local usa SQLite y creación automática de tablas por defecto.
+- Aún faltan contrato canónico de datos, ingesta controlada, backtesting, benchmarks académicos y observabilidad operativa.
+
+## Secuencia recomendada
 
 ```mermaid
-graph LR
-    subgraph "Fase 4: Optimización Logística Avanzada"
-        F4_1[Vehicle Routing Problem<br/>CVRP / VRPTW]
-        F4_2[3D Bin Packing<br/>Cubicaje de Contenedores]
-        F4_3[Cross-Docking & Scheduling]
-    end
-
-    subgraph "Fase 5: Pronóstico Jerárquico & Demanda Causal"
-        F5_1[Hierarchical Reconciliation<br/>MinT / Bottom-Up / Top-Down]
-        F5_2[Modelos Causales & Exógenos<br/>ARIMAX / Elasticidad Precio]
-        F5_3[Conformal Prediction Intervals]
-    end
-
-    subgraph "Fase 6: Arquitectura Asíncrona & Multi-Tenancy"
-        F6_1[Worker Queues<br/>Redis + Celery / ARQ]
-        F6_2[Seguridad & Multi-Tenancy<br/>OAuth2 / JWT / RBAC]
-        F6_3[Ingesta Masiva I/O<br/>CSV / Excel / Parquet]
-    end
-
-    subgraph "Fase 7: Experiencia de Usuario & Cloud"
-        F7_1[Dashboard Web Interactivo<br/>Next.js + D3 / Deck.gl]
-        F7_2[Cloud-Native Deployment<br/>Docker / K8s / Helm]
-        F7_3[Observabilidad Prometheus / OTel]
-    end
-
-    F4_1 --> Core[HareloStock Platform]
-    F5_1 --> Core
-    F6_1 --> Core
-    F7_1 --> Core
+flowchart LR
+    H[Fase 0<br/>Hardening científico] --> S[Fase 1<br/>Seguridad y plataforma]
+    S --> E[Fase 2<br/>Ejecución asíncrona]
+    E --> P[Fase 3<br/>Flujo de recomendaciones]
+    P --> A[Fase 4<br/>Forecast y optimización avanzada]
+    A --> L[Fase 5<br/>Logística y red]
+    L --> C[Fase 6<br/>UX y cloud a escala]
 ```
 
----
+### Fase 0 — Hardening científico y calidad de ingeniería
 
-## 3. Detalle de Módulos Sugeridos
+**Objetivo:** que cada endpoint tenga contratos claros, errores controlados y pruebas que protejan las decisiones numéricas.
 
-### Fase 4: Optimización Logística Avanzada (Transporte y Almacén)
+Avances incorporados:
 
-1. **Ruteo de Vehículos (Capacitated Vehicle Routing Problem - CVRP / VRPTW)**:
-   - **Objetivo**: Planificar las rutas óptimas para flotas de distribución de última milla minimizando la distancia y el costo total de combustible.
-   - **Restricciones**: Capacidad máxima de carga por vehículo (peso/volumen), ventanas de tiempo de entrega (*Time Windows*) en clientes y horarios de jornada laboral de conductores.
-   - **Enfoque algorítmico**: Metaheurísticas de gran escala (ALNS - *Adaptive Large Neighborhood Search*, Simulated Annealing) o formulaciones exactas con generación de columnas.
+- Validación de topología para MEIO y cálculo consistente de lead times acumulados.
+- Rutas no declaradas prohibidas en el MILP; costos de carril duplicados rechazados.
+- Costo de compra incluido en lot sizing.
+- AICc nulo y exclusión de candidatos cuando la corrección no es válida.
+- Selección de distribución documentada como heurística y Poisson limitado a conteos.
+- Pruebas de regresión y `ruff` como controles de calidad.
 
-2. **Empaquetado y Cubicaje 3D (*3D Bin Packing / Container Loading*)**:
-   - **Objetivo**: Optimizar la colocación de cajas y pallets dentro de camiones o contenedores marítimos de 20'/40' para maximizar la utilización volumétrica y respetar límites de peso por eje.
-   - **Algoritmos**: Heurísticas *Maximal Rectangles 3D*, *Guillotine Placement* y algoritmos genéticos espaciales.
+Pendiente para cerrar la fase:
 
----
+- Benchmarks contra casos publicados para inventario, forecast, MILP y lot sizing.
+- Backtesting rolling-origin, baselines naive/seasonal naive y métricas WAPE, MASE, RMSSE, bias y cobertura.
+- Model cards: alcance, supuestos, datos permitidos, métricas y límites de cada motor.
+- Versionado de código y dependencias en cada ejecución, además de la versión de API.
 
-### Fase 5: Pronósticos Jerárquicos y Factores Causales
+**Gate de salida:** CI obligatorio, cobertura de fallos de dominio, benchmarks reproducibles y documentación de supuestos por motor.
 
-1. **Reconciliación Jerárquica de Pronósticos (*Hierarchical Forecasting*)**:
-   - **Objetivo**: En cadenas de suministro reales, los pronósticos se realizan a múltiples niveles: SKU $\rightarrow$ Marca $\rightarrow$ Categoría $\rightarrow$ Centro de Distribución $\rightarrow$ País.
-   - **Métodos**:
-     - *Bottom-Up* (suma desde el nivel más granular).
-     - *Top-Down* (desagregación histórica de proporciones).
-     - **Reconciliación Óptima MinT (Minimum Trace)**: Ajuste estadístico por mínimos cuadrados generalizados que garantiza coherencia matricial exacta minimizando la varianza del error.
+### Fase 1 — Seguridad y plataforma de datos
 
-2. **Modelado de Elasticidad Precio y Promociones (ARIMAX / ML)**:
-   - Modelado de impacto de promociones, descuentos y variables meteorológicas/estacionales externas en la curva de demanda $d(p) = a \cdot p^{-\epsilon}$.
+**Objetivo:** preparar la API para información B2B sin exponer datos ni depender de configuración local.
 
-3. **Intervalos de Confianza Distribucionales (Conformal Prediction)**:
-   - Cuantificación rigurosa de incertidumbre sin asumir normalidad para dimensionamiento de inventario a percentiles extremos ($p_{99}$).
+- `organization_id` y políticas de aislamiento en todas las entidades y consultas.
+- OIDC/JWT, service accounts, RBAC, auditoría e idempotency keys.
+- PostgreSQL administrado, migraciones obligatorias, backups y secretos fuera del repositorio.
+- CORS restrictivo por entorno, rate limits, cuotas y límites de tamaño/cómputo.
+- Contenedores, CI/CD, escaneo de dependencias, logs estructurados, métricas y trazas.
+- Modelo canónico de SKU, ubicación, proveedor, inventario, demanda, lead time y restricciones.
 
----
+**Gate de salida:** prueba automatizada de no acceso cruzado entre organizaciones, restauración de backup validada y despliegue repetible en staging.
 
-### Fase 6: Infraestructura Enterprise, Asincronía e Ingesta Masiva
+### Fase 2 — Ejecución asíncrona y gobierno de corridas
 
-1. **Motor de Ejecución Asíncrono (*Task Queues*)**:
-   - Para corridas de optimización MILP complejas o simulaciones de más de 10,000 SKUs, implementar un broker (Redis) y workers distribuidos (Celery / ARQ / FastAPI Background Tasks).
-   - Patrón `POST /api/v1/scenarios/{id}/runs` $\rightarrow$ Retorna `202 Accepted` con `task_id` y pooling de estado o notificaciones por WebSockets.
+**Objetivo:** convertir cálculos pesados en trabajos observables, cancelables y con recursos controlados.
 
-2. **Seguridad, Autenticación y Multi-Tenancy (RBAC)**:
-   - Autenticación mediante tokens JWT (OAuth2 Password Bearer) o API Keys.
-   - Aislamiento de datos a nivel de base de datos (`tenant_id`, `organization_id`) para soportar despliegues SaaS multi-empresa.
+- Cola y workers (por ejemplo Redis + ARQ/Celery), estados `queued/running/succeeded/failed/cancelled` y timeouts.
+- Límites por tenant, reintentos seguros, cancelación, registro de consumo y notificaciones.
+- Resultados grandes en object storage y metadatos en PostgreSQL.
+- Versionado de dataset, motor, código, entorno y semilla para reproducibilidad real.
 
-3. **Ingesta y Exportación Masiva de Datos (*Batch File I/O*)**:
-   - Endpoints multipart para cargar archivos directamente desde ERPs (SAP, Oracle, NetSuite) en formatos `.csv`, `.xlsx` o Apache `.parquet`.
-   - Generación de reportes ejecutivos descargables en Excel y PDF con gráficos de reabastecimiento y órdenes de compra sugeridas.
+**Gate de salida:** una simulación o MILP grande no bloquea la API ni una corrida de otro tenant.
 
----
+### Fase 3 — Producto de recomendaciones y pilotos
 
-### Fase 7: Visualización Interactiva y Ecosistema Cloud-Native
+**Objetivo:** cerrar el ciclo dato → recomendación → aprobación → resultado.
 
-1. **Dashboard Web Interactivo (Frontend React / Next.js)**:
-   - Mapa geoespacial de la red de suministro con visualización de flujos de carga y rutas de transporte (Deck.gl / Mapbox / Leaflet).
-   - Tableros interactivos de matrices ABC/XYZ, análisis de inventario y curvas de demanda.
+- Carga CSV/Excel con validación, mapeo, reporte de calidad y datasets inmutables.
+- Políticas ROP, `(s,Q)`, `(R,S)`, base-stock y newsvendor con MOQ, pack size, presupuesto y calendario.
+- Recomendación explicable: acción, cantidad, costo, riesgo, restricciones, alternativas y fuente de datos.
+- Workflow de aprobación, modificación/rechazo con motivo, ejecución y valor observado.
+- Modo sombra, comparación contra planner y dashboard de ROI para design partners.
 
-2. **Infraestructura Cloud y Despliegue Automatizado**:
-   - `Dockerfile` multi-stage ligero para Python 3.13.
-   - `docker-compose.yml` completo con API + PostgreSQL + Redis + Worker + Nginx.
-   - Charts de Kubernetes / Helm para despliegue horizontal auto-escalable (HPA).
-   - Telemetría completa con Prometheus (`/metrics`) y OpenTelemetry.
+**Gate de salida:** cada recomendación tiene linaje completo y su impacto se puede comparar contra un baseline acordado.
 
----
+### Fase 4 — Forecast y optimización avanzada, por evidencia
 
-## 4. Guía de Ejecución Rápida
+**Objetivo:** mejorar decisiones, no añadir modelos por catálogo.
 
-```bash
-# 1. Ejecutar la suite completa de 60 pruebas
-python -m pytest -v
+- Forecast jerárquico: bottom-up, top-down y MinT.
+- Variables causales y promociones: primero datos, luego regresión/elasticidad y evaluación causal.
+- Intervalos conformales y cuantiles calibrados.
+- ML global como challenger (LightGBM/CatBoost/XGBoost con lags y covariables).
+- MILP multi-período, escenarios, restricciones robustas y optimización bajo incertidumbre.
+- Multi-echelon real solo con una formulación validada (GSM/METRIC), supuestos explícitos y benchmark independiente.
 
-# 2. Iniciar el servidor local en modo desarrollo
-uvicorn app.main:app --reload --port 8000
+**Gate de salida:** cada challenger supera al champion en métricas predictivas y operacionales, dentro de un SLA de costo y latencia.
 
-# 3. Explorar la documentación interactiva
-# Swagger UI: http://127.0.0.1:8000/docs
-# ReDoc:      http://127.0.0.1:8000/redoc
-```
+### Fase 5 — Logística y red
+
+**Objetivo:** extender decisiones de abastecimiento al transporte sin adelantar complejidad.
+
+- CVRP/VRPTW y planificación de rutas solo después de disponer de flota, ventanas y restricciones fiables.
+- Cubicaje/3D bin packing, cross-docking y scheduling como módulos separados con restricciones físicas verificables.
+- Digital twin y simulación de eventos discretos cuando exista un grafo de red y datos operacionales completos.
+
+### Fase 6 — Experiencia, integraciones y cloud a escala
+
+**Objetivo:** hacer el producto usable y operable para múltiples clientes.
+
+- Dashboard web de excepciones, decisiones, escenarios y resultados; no solo visualización de métricas.
+- Conectores priorizados por evidencia de clientes, webhooks y exportaciones controladas.
+- Kubernetes/Helm y autoescalado únicamente cuando la carga y el aislamiento lo justifiquen.
+- Observabilidad de producto: SLA, costo por tenant, latencia, errores y calidad de recomendación.
+
+## Criterios permanentes de priorización
+
+Una iniciativa entra solo si reduce riesgo de seguridad u operación, mejora la calidad/calibración de una decisión, hace factible una recomendación bajo restricciones reales, disminuye el tiempo de integración o demuestra valor económico para un cliente.

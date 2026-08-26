@@ -84,6 +84,28 @@ def test_non_gaussian_distributions_and_fitting():
     assert 0 <= summary_g["service_level"] <= 1.0
 
 
+def test_poisson_rejects_fractional_observations_and_auto_excludes_it():
+    fractional_demand = [0.5, 1.25, 2.5, 0.75]
+
+    with pytest.raises(ValueError, match="integer observations"):
+        fit_demand_distribution(fractional_demand, distribution_type="poisson")
+
+    fitted_name, _ = fit_demand_distribution(fractional_demand, distribution_type="auto")
+    assert fitted_name != "poisson"
+
+
+def test_simulation_api_rejects_fractional_poisson_demand(client):
+    response = client.post(
+        "/api/v1/simulation/monte-carlo",
+        json={
+            "skus": [_sku([1.5, 2.0, 3.0])],
+            "distribution": "poisson",
+        },
+    )
+
+    assert response.status_code == 422
+
+
 def test_optimiser_reports_non_convergence_and_final_service():
     result = optimise_service_level(
         [_sku([10, 10, 10], quantity_on_hand=0)],

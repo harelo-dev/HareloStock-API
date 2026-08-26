@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import math
 import statistics
-from typing import Any
 
 import numpy as np
 from scipy import stats
@@ -19,10 +18,35 @@ from app.services.inventory_service import SkuAnalysis, analyse_sku
 # ── Distribution Fitting & Sampling ──────────────────────────────────────────
 
 
+def _is_count_series(values: list[float]) -> bool:
+    return all(math.isclose(value, round(value), abs_tol=1e-9) for value in values)
+
+
+def _discrete_ks_distance(values: list[float], distribution) -> float:
+    """Return an ECDF distance for a discrete distribution without a p-value claim."""
+    sorted_values = sorted(int(round(value)) for value in values)
+    sample_size = len(sorted_values)
+    return max(
+        max(
+            index / sample_size - distribution.cdf(value)
+            for index, value in enumerate(sorted_values, 1)
+        ),
+        max(
+            distribution.cdf(value) - (index - 1) / sample_size
+            for index, value in enumerate(sorted_values, 1)
+        ),
+    )
+
+
 def fit_demand_distribution(
     demand: list[float], distribution_type: str = "auto"
 ) -> tuple[str, dict[str, float]]:
-    """Fit historical demand to Normal, Poisson, Gamma, or Log-Normal."""
+    """Fit demand distributions and select auto candidates by empirical CDF distance.
+
+    The automatic branch ranks fitted candidates heuristically. It does not use
+    hypothesis-test p-values, which would be invalid after estimating parameters
+    from the same data and are not directly applicable to discrete Poisson data.
+    """
     vals = [float(d) for d in demand if d >= 0]
     if not vals:
         return "normal", {"loc": 10.0, "scale": 2.0}
@@ -33,11 +57,13 @@ def fit_demand_distribution(
     if distribution_type == "normal":
         return "normal", {"loc": mean_val, "scale": max(1e-4, std_val)}
     if distribution_type == "poisson":
+        if not _is_count_series(vals):
+            raise ValueError("Poisson demand requires non-negative integer observations")
         return "poisson", {"lam": max(1e-4, mean_val)}
     if distribution_type == "gamma":
         if mean_val > 0 and std_val > 0:
             shape = (mean_val / std_val) ** 2
-            scale = (std_val ** 2) / mean_val
+            scale = (std_val**2) / mean_val
             return "gamma", {"shape": max(1e-4, shape), "scale": max(1e-4, scale)}
         return "normal", {"loc": mean_val, "scale": max(1e-4, std_val)}
     if distribution_type == "lognormal":
@@ -49,7 +75,8 @@ def fit_demand_distribution(
             return "lognormal", {"mean": mu, "sigma": max(1e-4, sigma)}
         return "normal", {"loc": mean_val, "scale": max(1e-4, std_val)}
 
-    # Auto-fit: Compare KS-test p-values across candidates
+    # Auto-fit: rank empirical CDF distances. This is intentionally a model
+    # selection heuristic, not a goodness-of-fit hypothesis test.
     candidates: dict[str, tuple[dict[str, float], float]] = {}
 
     # Candidate 1: Normal
@@ -57,18 +84,18 @@ def fit_demand_distribution(
         norm_dist = stats.norm(loc=mean_val, scale=max(1e-4, std_val))
         candidates["normal"] = (
             {"loc": mean_val, "scale": max(1e-4, std_val)},
-            float(stats.kstest(vals, norm_dist.cdf).pvalue),
+            float(stats.kstest(vals, norm_dist.cdf).statistic),
         )
     except Exception:
-        candidates["normal"] = ({"loc": mean_val, "scale": max(1e-4, std_val)}, 0.0)
+        candidates["normal"] = ({"loc": mean_val, "scale": max(1e-4, std_val)}, float("inf"))
 
-    # Candidate 2: Poisson (if mean > 0)
-    if mean_val > 0:
+    # Candidate 2: Poisson only supports count observations.
+    if mean_val > 0 and _is_count_series(vals):
         try:
             pois_dist = stats.poisson(mu=max(1e-4, mean_val))
             candidates["poisson"] = (
                 {"lam": max(1e-4, mean_val)},
-                float(stats.kstest(vals, pois_dist.cdf).pvalue),
+                _discrete_ks_distance(vals, pois_dist),
             )
         except Exception:
             pass
@@ -77,11 +104,11 @@ def fit_demand_distribution(
     if mean_val > 0 and std_val > 0:
         try:
             shape = (mean_val / std_val) ** 2
-            scale = (std_val ** 2) / mean_val
+            scale = (std_val**2) / mean_val
             gamma_dist = stats.gamma(a=max(1e-4, shape), scale=max(1e-4, scale))
             candidates["gamma"] = (
                 {"shape": max(1e-4, shape), "scale": max(1e-4, scale)},
-                float(stats.kstest(vals, gamma_dist.cdf).pvalue),
+                float(stats.kstest(vals, gamma_dist.cdf).statistic),
             )
         except Exception:
             pass
@@ -95,13 +122,13 @@ def fit_demand_distribution(
             lognorm_dist = stats.lognorm(s=max(1e-4, sigma), scale=math.exp(mu))
             candidates["lognormal"] = (
                 {"mean": mu, "sigma": max(1e-4, sigma)},
-                float(stats.kstest(vals, lognorm_dist.cdf).pvalue),
+                float(stats.kstest(vals, lognorm_dist.cdf).statistic),
             )
         except Exception:
             pass
 
-    # Choose candidate with highest p-value (closest to empirical)
-    best_dist = max(candidates.keys(), key=lambda k: candidates[k][1])
+    # Choose the candidate with the smallest empirical CDF distance.
+    best_dist = min(candidates.keys(), key=lambda k: candidates[k][1])
     return best_dist, candidates[best_dist][0]
 
 

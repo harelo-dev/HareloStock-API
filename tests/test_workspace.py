@@ -160,9 +160,7 @@ def test_archived_resources_cannot_start_new_work(client):
     dataset = _create_forecast_dataset(client, project["id"])
     scenario = _create_ses_scenario(client, project["id"], dataset["id"])
 
-    archived = client.patch(
-        f"/api/v1/projects/{project['id']}", json={"status": "archived"}
-    )
+    archived = client.patch(f"/api/v1/projects/{project['id']}", json={"status": "archived"})
     execution = client.post(f"/api/v1/scenarios/{scenario['id']}/runs")
 
     assert archived.status_code == 200
@@ -210,15 +208,25 @@ def test_archived_resources_cannot_start_new_work(client):
         ),
         (
             ScenarioEngine.LOT_SIZING,
-            {"demand": [20, 50, 10, 10, 50], "ordering_cost": 100.0, "holding_cost_per_period": 1.0},
+            {
+                "demand": [20, 50, 10, 10, 50],
+                "ordering_cost": 100.0,
+                "holding_cost_per_period": 1.0,
+            },
             "plans",
         ),
         (
             ScenarioEngine.FORECAST_HOLT_WINTERS,
             {
                 "demand": [
-                    100, 120, 150, 80,
-                    105, 125, 155, 82,
+                    100,
+                    120,
+                    150,
+                    80,
+                    105,
+                    125,
+                    155,
+                    82,
                 ],
                 "seasonal_periods": 4,
                 "optimise": False,
@@ -234,8 +242,23 @@ def test_archived_resources_cannot_start_new_work(client):
             ScenarioEngine.MULTI_ECHELON_INVENTORY,
             {
                 "nodes": [
-                    {"node_id": "CDC", "node_name": "CDC", "tier": 1, "lead_time": 2.0, "holding_cost": 1.0},
-                    {"node_id": "S1", "node_name": "Store 1", "tier": 2, "lead_time": 1.0, "holding_cost": 2.0, "demand_mean": 50.0, "demand_std": 10.0, "parent_node_id": "CDC"},
+                    {
+                        "node_id": "CDC",
+                        "node_name": "CDC",
+                        "tier": 1,
+                        "lead_time": 2.0,
+                        "holding_cost": 1.0,
+                    },
+                    {
+                        "node_id": "S1",
+                        "node_name": "Store 1",
+                        "tier": 2,
+                        "lead_time": 1.0,
+                        "holding_cost": 2.0,
+                        "demand_mean": 50.0,
+                        "demand_std": 10.0,
+                        "parent_node_id": "CDC",
+                    },
                 ],
                 "target_service_level": 0.95,
             },

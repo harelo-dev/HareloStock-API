@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import pytest
-
 from app.services.forecast_service import (
     auto_forecast,
     classify_demand_pattern,
@@ -101,12 +99,30 @@ def test_holt_optimisation_is_reproducible_for_a_seed():
 def test_holt_winters_additive_and_multiplicative():
     # Seasonal quarterly demand (24 quarters = 6 years)
     demand = [
-        100, 120, 150, 80,
-        105, 125, 155, 82,
-        110, 130, 160, 85,
-        115, 135, 165, 88,
-        120, 140, 170, 90,
-        125, 145, 175, 92,
+        100,
+        120,
+        150,
+        80,
+        105,
+        125,
+        155,
+        82,
+        110,
+        130,
+        160,
+        85,
+        115,
+        135,
+        165,
+        88,
+        120,
+        140,
+        170,
+        90,
+        125,
+        145,
+        175,
+        92,
     ]
 
     hw_add = holt_winters_forecast(
@@ -136,12 +152,30 @@ def test_holt_winters_additive_and_multiplicative():
 
 def test_auto_forecast_selects_holt_winters_on_seasonal_demand():
     seasonal_demand = [
-        100, 120, 150, 80,
-        105, 125, 155, 82,
-        110, 130, 160, 85,
-        115, 135, 165, 88,
-        120, 140, 170, 90,
-        125, 145, 175, 92,
+        100,
+        120,
+        150,
+        80,
+        105,
+        125,
+        155,
+        82,
+        110,
+        130,
+        160,
+        85,
+        115,
+        135,
+        165,
+        88,
+        120,
+        140,
+        170,
+        90,
+        125,
+        145,
+        175,
+        92,
     ]
 
     auto_res = auto_forecast(seasonal_demand, seasonal_periods=4, forecast_length=4)
@@ -153,7 +187,9 @@ def test_auto_forecast_selects_holt_winters_on_seasonal_demand():
 
 def test_croston_and_sba_forecasts_for_intermittent_demand():
     intermittent = [0, 10, 0, 0, 12, 0, 0, 0, 15, 0, 8, 0]
-    croston_res = croston_forecast(intermittent, alpha=0.1, gamma=0.1, variant="croston", forecast_length=3)
+    croston_res = croston_forecast(
+        intermittent, alpha=0.1, gamma=0.1, variant="croston", forecast_length=3
+    )
     sba_res = croston_forecast(intermittent, alpha=0.1, gamma=0.1, variant="sba", forecast_length=3)
     tsb_res = croston_forecast(intermittent, alpha=0.1, gamma=0.1, variant="tsb", forecast_length=3)
 
@@ -201,10 +237,22 @@ def test_holt_winters_api_endpoint(client):
         "/api/v1/forecast/holt-winters",
         json={
             "demand": [
-                100, 120, 150, 80,
-                105, 125, 155, 82,
-                110, 130, 160, 85,
-                115, 135, 165, 88,
+                100,
+                120,
+                150,
+                80,
+                105,
+                125,
+                155,
+                82,
+                110,
+                130,
+                160,
+                85,
+                115,
+                135,
+                165,
+                88,
             ],
             "seasonal_periods": 4,
             "seasonality_type": "additive",
@@ -232,3 +280,18 @@ def test_auto_forecast_api_endpoint(client):
     data = response.json()
     assert "selected_model" in data
     assert len(data["forecast"]) == 3
+
+
+def test_aicc_is_unavailable_when_sample_is_too_short_for_holt_winters():
+    demand = [10, 12, 8, 11, 10, 12, 8, 11]
+
+    direct = holt_winters_forecast(
+        demand,
+        seasonal_periods=4,
+        seasonality_type="additive",
+        optimise=False,
+    )
+    automatic = auto_forecast(demand, seasonal_periods=4)
+
+    assert direct["metrics"]["aicc"] is None
+    assert all("Holt-Winters" not in item["model_name"] for item in automatic["models_evaluated"])

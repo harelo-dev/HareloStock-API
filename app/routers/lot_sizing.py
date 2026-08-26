@@ -42,6 +42,7 @@ def compute_lot_sizing(req: LotSizingRequest):
             total_orders_placed=plan_data["total_orders_placed"],
             total_ordering_cost=plan_data["total_ordering_cost"],
             total_holding_cost=plan_data["total_holding_cost"],
+            total_purchase_cost=plan_data["total_purchase_cost"],
             total_cost=plan_data["total_cost"],
             average_inventory=plan_data["average_inventory"],
         )

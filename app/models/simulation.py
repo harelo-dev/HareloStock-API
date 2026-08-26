@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from typing import Literal
 
 from pydantic import Field, field_validator, model_validator
@@ -25,7 +26,7 @@ class MonteCarloRequest(ApiModel):
     period_length: int = Field(12, ge=1, le=52, description="Periods per run window.")
     distribution: Literal["auto", "normal", "poisson", "gamma", "lognormal"] = Field(
         "auto",
-        description="Demand distribution: 'auto' (selects best fit via KS-test), 'normal', 'poisson', 'gamma', or 'lognormal'.",
+        description="Demand distribution: 'auto' ranks fitted candidates by empirical CDF distance; 'poisson' requires integer observations.",
     )
     periods_per_year: int = Field(12, ge=1, le=366)
     seed: int = Field(42, ge=0, le=4_294_967_295)
@@ -42,6 +43,12 @@ class MonteCarloRequest(ApiModel):
             raise ValueError("sku_id values must be unique within a simulation")
         if len(self.skus) * self.runs * self.period_length > 2_000_000:
             raise ValueError("simulation workload exceeds 2,000,000 SKU-periods")
+        if self.distribution == "poisson" and any(
+            not math.isclose(value, round(value), abs_tol=1e-9)
+            for sku in self.skus
+            for value in sku.demand
+        ):
+            raise ValueError("Poisson demand requires non-negative integer observations")
         return self
 
 
@@ -84,6 +91,12 @@ class OptimiseServiceLevelRequest(ApiModel):
         work = len(self.skus) * self.runs * self.period_length * self.max_iterations
         if work > 5_000_000:
             raise ValueError("optimisation workload exceeds 5,000,000 SKU-periods")
+        if self.distribution == "poisson" and any(
+            not math.isclose(value, round(value), abs_tol=1e-9)
+            for sku in self.skus
+            for value in sku.demand
+        ):
+            raise ValueError("Poisson demand requires non-negative integer observations")
         return self
 
 

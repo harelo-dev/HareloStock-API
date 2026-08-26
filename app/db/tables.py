@@ -120,9 +120,7 @@ class CalculationRun(Base):
     project: Mapped[Project] = relationship(back_populates="runs")
     scenario: Mapped[Scenario] = relationship(back_populates="runs")
     dataset: Mapped[Dataset] = relationship(back_populates="runs")
-    result: Mapped[CalculationResult | None] = relationship(
-        back_populates="run", uselist=False
-    )
+    result: Mapped[CalculationResult | None] = relationship(back_populates="run", uselist=False)
 
 
 class CalculationResult(Base):
